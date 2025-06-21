@@ -1,8 +1,12 @@
-<p align="center">
-  <img src="client/public/thor.png" alt="Thor Logo" width="180"/>
-</p>
+<div align="center">
+  <img src="client/public/thor.png" alt="Thor Logo" width="120"/>
+  <h1>Thor: WiZ Lights Controller</h1>
+  <p><em>Comprehensive React-based web application for controlling Philips WiZ smart lights</em></p>
+</div>
 
-# Thor: WiZ Lights Controller
+---
+
+## Overview
 
 Thor is a comprehensive React-based web application for controlling Philips WiZ smart lights with advanced features including rhythm synchronization, color control, and network discovery.
 
