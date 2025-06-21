@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiZ Lights Controller</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+            padding: 25px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            border-left: 5px solid #667eea;
+        }
+        
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button.danger {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+        }
+        
+        button.success {
+            background: linear-gradient(45deg, #51cf66, #40c057);
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        input, select {
+            padding: 10px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+        
+        input[type="range"] {
+            padding: 0;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 5px;
+            outline: none;
+            appearance: none;
+            -webkit-appearance: none;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            appearance: none;
+            -webkit-appearance: none;
+            height: 20px;
+            width: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            box-shadow: 0 0 2px rgba(0,0,0,0.2);
+        }
+        
+        input[type="range"]::-moz-range-thumb {
+            height: 20px;
+            width: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 0 2px rgba(0,0,0,0.2);
+        }
+        
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .lights-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .light-card {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+        
+        .light-card:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+        }
+        
+        .light-card h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .status {
+            padding: 10px 20px;
+            border-radius: 20px;
+            margin: 20px 0;
+            font-weight: 600;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .color-picker-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin: 15px 0;
+            max-width: 100%;
+            overflow: hidden;
+        }
+        
+        input[type="color"] {
+            width: 50px;
+            height: 40px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+        
+        .rhythm-controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .effect-button {
+            padding: 15px;
+            text-align: center;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        .effect-button:hover {
+            transform: scale(1.05);
+        }
+        
+        .ws-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: 600;
+            z-index: 1000;
+        }
+        
+        .ws-connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .ws-disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+                margin: 10px;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            .button-group {
+                justify-content: center;
+            }
+            
+            .input-group {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="ws-status" id="wsStatus">Connecting...</div>
+    
+    <div class="container">
+        <h1>🌟 WiZ Lights Controller</h1>
+        
+        <!-- Discovery Section -->
+        <div class="section">
+            <h2>🔍 Discover Lights</h2>
+            <div class="input-group">
+                <input type="text" id="subnet" placeholder="Auto-detecting..." value="">
+                <button onclick="discoverLights()">Discover Lights</button>
+                <button onclick="refreshLights()">Refresh</button>
+                <button onclick="loadNetworkInfo()" title="Auto-detect network">🔄 Auto</button>
+            </div>
+            
+            <div class="input-group">
+                <input type="text" id="testIP" placeholder="192.168.0.110" value="">
+                <button onclick="testSingleIP()">Test Single IP</button>
+                <small>Test UDP communication with specific IP:38899</small>
+            </div>
+            
+            <div id="discoveryStatus" class="status info" style="display: none;"></div>
+            <div id="lightsList" class="lights-list"></div>
+        </div>
+        
+        <!-- Light Control Section -->
+        <div class="section">
+            <h2>💡 Light Control</h2>
+            <div class="button-group">
+                <button class="success" onclick="allLightsOn()">All Lights On</button>
+                <button class="danger" onclick="allLightsOff()">All Lights Off</button>
+            </div>
+            
+            <div class="input-group">
+                <label>Set Color for All:</label>
+                <input type="color" id="colorPicker" onchange="setAllLightsColor()">
+                <input type="range" id="brightnessSlider" min="1" max="100" value="80" onchange="setAllLightsBrightness()">
+                <span id="brightnessValue">80%</span>
+            </div>
+            
+            <div class="input-group">
+                <label>Set Temperature for All:</label>
+                <input type="range" id="temperatureSlider" min="2200" max="6500" value="4200" onchange="setAllLightsTemperature()">
+                <span id="temperatureValue">4200K</span>
+                <small>(2200K=Warm, 6500K=Cool)</small>
+            </div>
+            
+            <div class="button-group">
+                <button onclick="setPresetTemperature(2700)" style="background: linear-gradient(45deg, #ff9500, #ff7b00);">🔥 Warm (2700K)</button>
+                <button onclick="setPresetTemperature(4200)" style="background: linear-gradient(45deg, #ffcc00, #ff9500);">☀️ Neutral (4200K)</button>
+                <button onclick="setPresetTemperature(6500)" style="background: linear-gradient(45deg, #00aaff, #0088cc);">❄️ Cool (6500K)</button>
+            </div>
+        </div>
+        
+        <!-- Rhythm Control Section -->
+        <div class="section">
+            <h2>🎵 Rhythm & Music Sync</h2>
+            <div class="button-group">
+                <button onclick="setupRhythm()">Setup Rhythm (All Lights)</button>
+                <button class="danger" onclick="stopRhythm()">Stop All Effects</button>
+            </div>
+            
+            <div class="input-group">
+                <label>BPM:</label>
+                <input type="number" id="bpmInput" min="60" max="200" value="120" onchange="setBPM()">
+                <button onclick="triggerBeat()">Manual Beat</button>
+            </div>
+            
+            <div class="rhythm-controls">
+                <button class="effect-button" onclick="startEffect('pulse')">
+                    ⚡ Pulse<br><small>Flash on each beat</small>
+                </button>
+                <button class="effect-button" onclick="startEffect('rainbow')">
+                    🌈 Rainbow<br><small>Cycle through colors</small>
+                </button>
+                <button class="effect-button" onclick="startEffect('strobe')">
+                    💫 Strobe<br><small>Random flashing</small>
+                </button>
+                <button class="effect-button" onclick="startEffect('wave')">
+                    🌊 Wave<br><small>Smooth wave pattern</small>
+                </button>
+                <button class="effect-button" onclick="startEffect('beat')">
+                    🎯 Beat<br><small>Random colors</small>
+                </button>
+                <button class="effect-button" onclick="startEffect('breathe')">
+                    🫁 Breathe<br><small>Breathing effect</small>
+                </button>
+            </div>
+            
+            <div id="rhythmStatus" class="status info" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let discoveredLights = [];
+        let connectedLights = [];
+
+        // WebSocket connection
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${window.location.host}`);
+            
+            ws.onopen = () => {
+                updateWSStatus(true);
+                console.log('WebSocket connected');
+            };
+            
+            ws.onclose = () => {
+                updateWSStatus(false);
+                console.log('WebSocket disconnected');
+                // Reconnect after 3 seconds
+                setTimeout(connectWebSocket, 3000);
+            };
+            
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                handleWebSocketMessage(message);
+            };
+        }
+
+        function updateWSStatus(connected) {
+            const status = document.getElementById('wsStatus');
+            if (connected) {
+                status.textContent = '🟢 Connected';
+                status.className = 'ws-status ws-connected';
+            } else {
+                status.textContent = '🔴 Disconnected';
+                status.className = 'ws-status ws-disconnected';
+            }
+        }
+
+        function handleWebSocketMessage(message) {
+            console.log('WebSocket message:', message);
+            
+            switch (message.type) {
+                case 'discovery':
+                    discoveredLights = message.data.lights;
+                    updateLightsList();
+                    break;
+                case 'rhythmStarted':
+                    showStatus('rhythmStatus', `🎵 Started ${message.data.effect} effect at ${message.data.bpm} BPM`, 'success');
+                    break;
+                case 'rhythmStopped':
+                    showStatus('rhythmStatus', '⏹️ Rhythm effects stopped', 'info');
+                    break;
+            }
+        }
+
+        // API functions
+        async function apiCall(url, method = 'GET', data = null) {
+            try {
+                const options = {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                };
+                
+                if (data) {
+                    options.body = JSON.stringify(data);
+                }
+                
+                const response = await fetch(url, options);
+                return await response.json();
+            } catch (error) {
+                console.error('API call failed:', error);
+                return { success: false, error: error.message };
+            }
+        }
+
+        async function discoverLights() {
+            const subnet = document.getElementById('subnet').value;
+            showStatus('discoveryStatus', '🔍 Starting discovery...', 'info');
+            
+            // Show that we're trying broadcast first
+            setTimeout(() => {
+                showStatus('discoveryStatus', '📡 Trying broadcast discovery...', 'info');
+            }, 100);
+            
+            const result = await apiCall('/api/discover', 'POST', { subnet, timeout: 5000 });
+            
+            if (result.success) {
+                const method = result.lights.length > 0 && result.lights[0].method ? 
+                    result.lights[0].method === 'broadcast' ? '📡 Broadcast' : '🎯 IP Scan' : 
+                    'Unknown';
+                
+                showStatus('discoveryStatus', 
+                    `✅ Found ${result.count} lights on ${result.subnet} using ${method} method`, 'success');
+                discoveredLights = result.lights;
+                updateLightsList();
+            } else {
+                showStatus('discoveryStatus', `❌ Discovery failed: ${result.error}`, 'error');
+            }
+        }
+
+        async function connectLight(ip) {
+            const result = await apiCall(`/api/lights/${ip}/connect`, 'POST');
+            
+            if (result.success) {
+                if (!connectedLights.includes(ip)) {
+                    connectedLights.push(ip);
+                }
+                // Initialize light state as off by default
+                if (lightStates[ip] === undefined) {
+                    lightStates[ip] = false;
+                }
+                updateLightsList();
+            }
+            
+            return result.success;
+        }
+
+        async function disconnectLight(ip) {
+            const result = await apiCall(`/api/lights/${ip}/disconnect`, 'POST');
+            
+            if (result.success) {
+                connectedLights = connectedLights.filter(lightIp => lightIp !== ip);
+                updateLightsList();
+            }
+            
+            return result.success;
+        }
+
+        function updateLightsList() {
+            const container = document.getElementById('lightsList');
+            container.innerHTML = '';
+            
+            discoveredLights.forEach(light => {
+                const isConnected = connectedLights.includes(light.ip);
+                
+                const card = document.createElement('div');
+                card.className = 'light-card';
+                card.innerHTML = `
+                    <h3>💡 Light ${light.ip}</h3>
+                    <div class="button-group">
+                        ${isConnected ? 
+                            `<button class="danger" onclick="disconnectLight('${light.ip}')">Disconnect</button>
+                             <button onclick="toggleLight('${light.ip}')" class="${lightStates[light.ip] ? 'danger' : 'success'}">${lightStates[light.ip] ? 'Turn Off' : 'Turn On'}</button>` :
+                            `<button onclick="connectLight('${light.ip}')">Connect</button>`
+                        }
+                    </div>
+                    ${isConnected ? 
+                        `<div class="color-picker-container">
+                            <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between;">
+                                <input type="color" onchange="setLightColorFromPicker('${light.ip}', this.value)" 
+                                       title="Color" style="width: 50px; height: 40px; flex-shrink: 0;">
+                                <input type="range" min="1" max="100" value="80" 
+                                       onchange="setLightBrightness('${light.ip}', this.value)" 
+                                       title="Brightness" style="flex: 1; min-width: 0;">
+                                <span style="font-size: 12px; flex-shrink: 0; min-width: 30px;">Bright</span>
+                            </div>
+                            <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between;">
+                                <label style="font-size: 12px; flex-shrink: 0; min-width: 35px;">Temp:</label>
+                                <input type="range" min="2200" max="6500" value="4200" 
+                                       onchange="setLightTemperature('${light.ip}', this.value)" 
+                                       style="flex: 1; min-width: 0;" title="Color Temperature">
+                                <span id="temp-${light.ip}" style="font-size: 12px; flex-shrink: 0; min-width: 50px;">4200K</span>
+                            </div>
+                        </div>` : ''
+                    }
+                `;
+                
+                container.appendChild(card);
+            });
+        }
+
+        // Track light states
+        let lightStates = {};
+
+        async function toggleLight(ip) {
+            // Get current state, default to false (off)
+            const currentState = lightStates[ip] || false;
+            const newState = !currentState;
+            
+            if (newState) {
+                const result = await apiCall(`/api/lights/${ip}/on`, 'POST');
+                if (result.success) {
+                    lightStates[ip] = true;
+                    updateLightButton(ip, true);
+                }
+            } else {
+                const result = await apiCall(`/api/lights/${ip}/off`, 'POST');
+                if (result.success) {
+                    lightStates[ip] = false;
+                    updateLightButton(ip, false);
+                }
+            }
+        }
+
+        function updateLightButton(ip, isOn) {
+            // Update the toggle button text/style to reflect current state
+            const button = document.querySelector(`button[onclick="toggleLight('${ip}')"]`);
+            if (button) {
+                button.textContent = isOn ? 'Turn Off' : 'Turn On';
+                button.className = isOn ? 'danger' : 'success';
+            }
+        }
+
+        async function setLightColorFromPicker(ip, color) {
+            const r = parseInt(color.substr(1, 2), 16);
+            const g = parseInt(color.substr(3, 2), 16);
+            const b = parseInt(color.substr(5, 2), 16);
+            
+            // Find the brightness slider for this specific light
+            const lightCard = document.querySelector(`input[onchange*="setLightBrightness('${ip}'"]`);
+            const brightness = lightCard ? parseInt(lightCard.value) : 80; // Default to 80 if not found
+            
+            await apiCall(`/api/lights/${ip}/color`, 'POST', { r, g, b, brightness });
+        }
+
+        async function setLightBrightness(ip, brightness) {
+            await apiCall(`/api/lights/${ip}/brightness`, 'POST', { brightness: parseInt(brightness) });
+        }
+
+        async function setLightTemperature(ip, temperature) {
+            const temp = parseInt(temperature);
+            await apiCall(`/api/lights/${ip}/temperature`, 'POST', { temperature: temp });
+            
+            // Update the display
+            const tempDisplay = document.getElementById(`temp-${ip}`);
+            if (tempDisplay) {
+                tempDisplay.textContent = `${temp}K`;
+            }
+        }
+
+        async function allLightsOn() {
+            const result = await apiCall('/api/lights/all/on', 'POST');
+            if (result.success) {
+                // Update all light states
+                connectedLights.forEach(ip => {
+                    lightStates[ip] = true;
+                    updateLightButton(ip, true);
+                });
+                showStatus('discoveryStatus', '✅ All lights turned on', 'success');
+            } else {
+                showStatus('discoveryStatus', `❌ Failed to turn on all lights: ${result.error}`, 'error');
+            }
+        }
+
+        async function allLightsOff() {
+            const result = await apiCall('/api/lights/all/off', 'POST');
+            if (result.success) {
+                // Update all light states
+                connectedLights.forEach(ip => {
+                    lightStates[ip] = false;
+                    updateLightButton(ip, false);
+                });
+                showStatus('discoveryStatus', '✅ All lights turned off', 'success');
+            } else {
+                showStatus('discoveryStatus', `❌ Failed to turn off all lights: ${result.error}`, 'error');
+            }
+        }
+
+        function setAllLightsColor() {
+            const color = document.getElementById('colorPicker').value;
+            const r = parseInt(color.substr(1, 2), 16);
+            const g = parseInt(color.substr(3, 2), 16);
+            const b = parseInt(color.substr(5, 2), 16);
+            const brightness = parseInt(document.getElementById('brightnessSlider').value);
+            
+            connectedLights.forEach(ip => {
+                apiCall(`/api/lights/${ip}/color`, 'POST', { r, g, b, brightness });
+            });
+        }
+
+        function setAllLightsBrightness() {
+            const brightness = document.getElementById('brightnessSlider').value;
+            document.getElementById('brightnessValue').textContent = `${brightness}%`;
+            
+            connectedLights.forEach(ip => {
+                apiCall(`/api/lights/${ip}/brightness`, 'POST', { brightness: parseInt(brightness) });
+            });
+        }
+
+        function setAllLightsTemperature() {
+            const temperature = document.getElementById('temperatureSlider').value;
+            document.getElementById('temperatureValue').textContent = `${temperature}K`;
+            
+            connectedLights.forEach(ip => {
+                apiCall(`/api/lights/${ip}/temperature`, 'POST', { temperature: parseInt(temperature) });
+                
+                // Update individual displays
+                const tempDisplay = document.getElementById(`temp-${ip}`);
+                if (tempDisplay) {
+                    tempDisplay.textContent = `${temperature}K`;
+                }
+            });
+        }
+
+        function setPresetTemperature(temp) {
+            // Update the slider
+            document.getElementById('temperatureSlider').value = temp;
+            document.getElementById('temperatureValue').textContent = `${temp}K`;
+            
+            // Apply to all lights
+            connectedLights.forEach(ip => {
+                apiCall(`/api/lights/${ip}/temperature`, 'POST', { temperature: temp });
+                
+                // Update individual displays
+                const tempDisplay = document.getElementById(`temp-${ip}`);
+                if (tempDisplay) {
+                    tempDisplay.textContent = `${temp}K`;
+                }
+            });
+        }
+
+        async function setupRhythm() {
+            const result = await apiCall('/api/rhythm/setup', 'POST', { lights: connectedLights });
+            if (result.success) {
+                showStatus('rhythmStatus', `🎵 Rhythm setup with ${result.lights.length} lights`, 'success');
+            } else {
+                showStatus('rhythmStatus', `❌ Setup failed: ${result.error}`, 'error');
+            }
+        }
+
+        async function startEffect(effect) {
+            const bpm = parseInt(document.getElementById('bpmInput').value);
+            const result = await apiCall('/api/rhythm/start', 'POST', { effect, bpm });
+            
+            if (result.success) {
+                showStatus('rhythmStatus', `🎵 Started ${effect} effect at ${bpm} BPM`, 'success');
+            } else {
+                showStatus('rhythmStatus', `❌ Failed to start effect: ${result.error}`, 'error');
+            }
+        }
+
+        async function stopRhythm() {
+            const result = await apiCall('/api/rhythm/stop', 'POST');
+            if (result.success) {
+                showStatus('rhythmStatus', '⏹️ All effects stopped', 'info');
+            }
+        }
+
+        async function setBPM() {
+            const bpm = parseInt(document.getElementById('bpmInput').value);
+            await apiCall('/api/rhythm/bpm', 'POST', { bpm });
+        }
+
+        async function triggerBeat() {
+            await apiCall('/api/rhythm/beat', 'POST', { intensity: 1 });
+        }
+
+        async function refreshLights() {
+            const result = await apiCall('/api/lights');
+            if (result.success) {
+                discoveredLights = result.lights;
+                connectedLights = result.connected;
+                updateLightsList();
+                showStatus('discoveryStatus', '🔄 Lights list refreshed', 'info');
+            }
+        }
+
+        async function testSingleIP() {
+            const ip = document.getElementById('testIP').value.trim();
+            if (!ip) {
+                showStatus('discoveryStatus', '❌ Please enter an IP address to test', 'error');
+                return;
+            }
+
+            showStatus('discoveryStatus', `🔧 Testing UDP communication with ${ip}:38899...`, 'info');
+            
+            const result = await apiCall(`/api/test/${ip}`, 'POST');
+            
+            if (result.success) {
+                showStatus('discoveryStatus', `✅ Successfully communicated with ${ip}`, 'success');
+                
+                // Try to add this to discovered lights if not already there
+                if (!discoveredLights.find(light => light.ip === ip)) {
+                    discoveredLights.push({
+                        ip: ip,
+                        port: 38899,
+                        response: { test: true }
+                    });
+                    updateLightsList();
+                }
+            } else {
+                showStatus('discoveryStatus', `❌ Failed to communicate with ${ip}: ${result.error}`, 'error');
+            }
+        }
+
+        function showStatus(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `status ${type}`;
+            element.style.display = 'block';
+            
+            setTimeout(() => {
+                element.style.display = 'none';
+            }, 5000);
+        }
+
+        // Initialize network and WebSocket
+        async function initializeApp() {
+            await loadNetworkInfo();
+            connectWebSocket();
+            refreshLights();
+        }
+
+        async function loadNetworkInfo() {
+            try {
+                showStatus('discoveryStatus', '🔍 Auto-detecting network...', 'info');
+                const result = await apiCall('/api/network');
+                if (result.success) {
+                    const subnetInput = document.getElementById('subnet');
+                    subnetInput.value = result.primaryBroadcast;
+                    subnetInput.placeholder = result.primaryBroadcast;
+                    console.log(`Detected network broadcast: ${result.primaryBroadcast}`);
+                    showStatus('discoveryStatus', `✅ Auto-detected broadcast: ${result.primaryBroadcast}`, 'success');
+                }
+            } catch (error) {
+                console.warn('Failed to load network info, using default:', error);
+                document.getElementById('subnet').value = '192.168.1.255';
+                showStatus('discoveryStatus', '⚠️ Auto-detection failed, using default: 192.168.1.255', 'error');
+            }
+        }
+
+        // Initialize
+        initializeApp();
+    </script>
+</body>
+</html> 
