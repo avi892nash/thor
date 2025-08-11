@@ -12,12 +12,12 @@ Thor is a comprehensive React-based web application for controlling Philips WiZ 
 
 ## Features
 
-- 🔍 **Network Discovery**: Automatically discover WiZ lights on your network
-- 💡 **Light Control**: Individual and group control of lights (on/off, brightness, color, temperature)
-- 🎵 **Rhythm & Music Sync**: Synchronize lights with music/beats with various effects
-- 🌐 **Real-time Updates**: WebSocket connection for live status updates
-- 📱 **Responsive Design**: Modern, mobile-friendly interface
-- ⚡ **React Architecture**: Component-based structure with proper state management
+- **Network Discovery**: Automatically discover WiZ lights on your network
+- **Light Control**: Individual and group control of lights (on/off, brightness, color, temperature)
+- **Rhythm & Music Sync**: Synchronize lights with music/beats with various effects
+- **Real-time Updates**: WebSocket connection for live status updates
+- **Responsive Design**: Modern, mobile-friendly interface
+- **React Architecture**: Component-based structure with proper state management
 
 ## Architecture
 
@@ -110,10 +110,7 @@ npm start
         │   ├── useApi.ts    # API call management
         │   └── useWebSocket.ts # WebSocket connection
         └── components/      # React components
-            ├── DiscoverySection.tsx
-            ├── LightControlSection.tsx
-            ├── RhythmControlSection.tsx
-            └── WebSocketStatus.tsx
+            └── RoomManager.tsx
 ```
 
 ## Benefits of React Conversion

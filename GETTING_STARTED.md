@@ -1,15 +1,15 @@
-# Getting Started with WiZ Lights Controller 🎵💡
+# Getting Started with WiZ Lights Controller
 
 A simple guide to get your Philips WiZ lights dancing to the rhythm!
 
 ## What This Does
 
 This tool lets you:
-- ✨ Control all your WiZ lights from one place
-- 🎵 Make lights flash and change colors to music
-- 🌈 Create cool lighting effects
-- 📱 Control lights from your phone/computer
-- 🎯 Trigger effects manually or automatically
+- Control all your WiZ lights from one place
+- Make lights flash and change colors to music
+- Create cool lighting effects
+- Control lights from your phone/computer
+- Trigger effects manually or automatically
 
 ## Before You Start
 
@@ -35,10 +35,10 @@ npm start
 
 You should see:
 ```
-🚀 WiZ Lights Server running on port 3000
-📡 WebSocket server running on ws://localhost:3000
-🔍 Use POST /api/discover to find lights on your network
-🎵 Use /api/rhythm/* endpoints for music synchronization
+WiZ Lights Server running on port 3000
+WebSocket server running on ws://localhost:3000
+Use POST /api/discover to find lights on your network
+Use /api/rhythm/* endpoints for music synchronization
 ```
 
 ### Step 2: Open the Web Interface
@@ -66,7 +66,7 @@ You should see:
 2. Use the color picker to change all lights to a color
 3. Use the brightness slider
 
-## Making Lights Dance to Music 🎵
+## Making Lights Dance to Music
 
 ### Quick Start - Rhythm Effects
 
@@ -77,12 +77,12 @@ You should see:
 2. **Start an Effect:**
    - Choose BPM (beats per minute) - try 120 for normal music
    - Click any effect button:
-     - ⚡ **Pulse** - Flash on each beat
-     - 🌈 **Rainbow** - Cycle through colors
-     - 💫 **Strobe** - Random flashing
-     - 🌊 **Wave** - Smooth wave pattern
-     - 🎯 **Beat** - Random colors each beat
-     - 🫁 **Breathe** - Gentle breathing effect
+     - **Pulse** - Flash on each beat
+     - **Rainbow** - Cycle through colors
+     - **Strobe** - Random flashing
+     - **Wave** - Smooth wave pattern
+     - **Beat** - Random colors each beat
+     - **Breathe** - Gentle breathing effect
 
 3. **Manual Beat Trigger:**
    - Click **"Manual Beat"** to trigger effects instantly
@@ -151,7 +151,7 @@ curl -X POST http://localhost:3000/api/rhythm/start \
 
 ## Common Issues & Solutions
 
-### 🔴 No Lights Found
+### No Lights Found
 **Problem**: Discovery shows 0 lights
 **Solutions**:
 1. Check lights work in official WiZ app first
@@ -162,14 +162,14 @@ curl -X POST http://localhost:3000/api/rhythm/start \
 3. Make sure computer and lights are on same Wi-Fi network
 4. Turn lights off and on again
 
-### 🔴 Can't Connect to Light
+### Can't Connect to Light
 **Problem**: Connect button doesn't work
 **Solutions**:
 1. Light might be busy - wait 10 seconds and try again
 2. Restart the light (turn off/on)
 3. Check if another app is controlling the light
 
-### 🔴 Rhythm Effects Don't Work
+### Rhythm Effects Don't Work
 **Problem**: Effects start but lights don't change
 **Solutions**:
 1. Make sure you clicked "Setup Rhythm" first
@@ -177,7 +177,7 @@ curl -X POST http://localhost:3000/api/rhythm/start \
 3. Try turning lights on manually first
 4. Check BPM is between 60-200
 
-### 🔴 Web Interface Won't Load
+### Web Interface Won't Load
 **Problem**: Browser shows error
 **Solutions**:
 1. Make sure server is running (see startup messages)
@@ -224,4 +224,4 @@ Once you're comfortable with the basics:
 - Create scheduled lighting scenes
 - Connect to music streaming services
 
-Have fun with your smart lights! 🎉 
+Have fun with your smart lights! 
