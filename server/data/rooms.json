@@ -1,0 +1,46 @@
+{
+  "rooms": [
+    {
+      "id": "1754257635992",
+      "name": "Avinash",
+      "devices": [
+        {
+          "id": "cc4085620d6e",
+          "type": "wiz_light",
+          "mac": "cc4085620d6e",
+          "ip": "192.168.0.110",
+          "port": 38899,
+          "name": "Bulb 1",
+          "state": true,
+          "properties": {}
+        },
+        {
+          "id": "cc408562cd48",
+          "type": "wiz_light",
+          "mac": "cc408562cd48",
+          "ip": "192.168.0.180",
+          "port": 38899,
+          "name": "Bulb 2",
+          "state": true,
+          "properties": {}
+        }
+      ]
+    },
+    {
+      "id": "1773433194636",
+      "name": "Anurag",
+      "devices": [
+        {
+          "id": "cc4085645986",
+          "type": "wiz_light",
+          "mac": "cc4085645986",
+          "ip": "192.168.0.168",
+          "port": 38899,
+          "name": "Bulb 3",
+          "state": true,
+          "properties": {}
+        }
+      ]
+    }
+  ]
+}

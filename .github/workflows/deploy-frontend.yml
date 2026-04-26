@@ -1,0 +1,234 @@
+name: Deploy Frontend to S3
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  NODE_VERSION: '18'
+  AWS_REGION: 'ap-south-1'
+  S3_BUCKET: 'devshram.com'
+  S3_PREFIX: 'projects/thor'
+
+jobs:
+  # Job 1: Build and Test
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint --if-present
+        continue-on-error: true
+
+      - name: Run tests
+        run: npm test -- --passWithNoTests --watchAll=false
+        continue-on-error: true
+
+      - name: Build frontend
+        env:
+          REACT_APP_API_URL: ${{ secrets.API_URL || 'https://thor-api.devshram.in' }}
+          REACT_APP_API_KEY: ${{ secrets.API_KEY }}
+          CI: false
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build
+          retention-days: 1
+
+  # Job 2: Validate Build
+  validate:
+    name: Validate Build
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: build
+
+      - name: Check build output
+        run: |
+          echo "Validating build output..."
+
+          # Check if index.html exists
+          if [ ! -f "build/index.html" ]; then
+            echo "ERROR: index.html not found!"
+            exit 1
+          fi
+
+          # Check if static assets exist
+          if [ ! -d "build/static" ]; then
+            echo "ERROR: static directory not found!"
+            exit 1
+          fi
+
+          # Check JS files exist
+          JS_COUNT=$(find build/static/js -name "*.js" | wc -l)
+          if [ "$JS_COUNT" -eq 0 ]; then
+            echo "ERROR: No JavaScript files found!"
+            exit 1
+          fi
+
+          # Check CSS files exist
+          CSS_COUNT=$(find build/static/css -name "*.css" | wc -l)
+          if [ "$CSS_COUNT" -eq 0 ]; then
+            echo "ERROR: No CSS files found!"
+            exit 1
+          fi
+
+          echo "Build validation passed!"
+          echo "  - index.html: OK"
+          echo "  - JS files: $JS_COUNT"
+          echo "  - CSS files: $CSS_COUNT"
+
+      - name: Check for sensitive data
+        run: |
+          echo "Checking for sensitive data leaks..."
+
+          # Check for common sensitive patterns
+          SENSITIVE_PATTERNS="password|secret|api_key|private_key|AWS_SECRET"
+
+          if grep -rEi "$SENSITIVE_PATTERNS" build/ --include="*.js" --include="*.html" | grep -v "node_modules"; then
+            echo "WARNING: Potential sensitive data found in build!"
+            # Not failing, just warning
+          else
+            echo "No sensitive data patterns found. OK!"
+          fi
+
+  # Job 3: Health Check Server
+  health-check:
+    name: Check API Server Health
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Check API server is reachable
+        run: |
+          API_URL="${{ secrets.API_URL || 'https://thor-api.devshram.in' }}"
+          echo "Checking API server health at: $API_URL/health"
+
+          # Try health endpoint with retry
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/health" --connect-timeout 10 || echo "000")
+
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "API server is healthy! (HTTP $HTTP_STATUS)"
+              exit 0
+            fi
+
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "Attempt $RETRY_COUNT: API returned HTTP $HTTP_STATUS, retrying..."
+            sleep 5
+          done
+
+          echo "WARNING: API server health check failed after $MAX_RETRIES attempts"
+          echo "Deployment will continue but please verify the API server is running"
+          # Not failing deployment, just warning
+
+  # Job 4: Deploy to S3
+  deploy:
+    name: Deploy to S3
+    runs-on: ubuntu-latest
+    needs: [build, validate, health-check]
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to S3
+        run: |
+          S3_DEST="s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}"
+
+          echo "Deploying to $S3_DEST (ap-south-1)..."
+
+          # Sync static assets with long-term cache (hashed filenames)
+          aws s3 sync build/ "$S3_DEST" \
+            --delete \
+            --cache-control "max-age=31536000,public" \
+            --exclude "index.html" \
+            --exclude "*.json"
+
+          # Upload index.html with no-cache (entry point must always be fresh)
+          aws s3 cp build/index.html "$S3_DEST/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate"
+
+          # Upload JSON files with no-cache
+          find build -name "*.json" | while read f; do
+            key="${f#build/}"
+            aws s3 cp "$f" "$S3_DEST/$key" \
+              --cache-control "no-cache,no-store,must-revalidate"
+          done
+
+          echo "Deployment to $S3_DEST complete!"
+
+      - name: Invalidate CloudFront cache (if configured)
+        if: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID != '' }}
+        run: |
+          echo "Invalidating CloudFront cache..."
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+          echo "CloudFront invalidation initiated!"
+
+      - name: Deployment summary
+        run: |
+          echo "========================================="
+          echo "DEPLOYMENT COMPLETE"
+          echo "========================================="
+          echo "S3:          s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}"
+          echo "Region:      ap-south-1"
+          echo "Frontend:    ${{ secrets.FRONTEND_URL || 'https://thor.devshram.in' }}"
+          echo "API:         ${{ secrets.API_URL || 'https://thor-api.devshram.in' }}"
+          echo "========================================="

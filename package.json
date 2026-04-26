@@ -1,38 +1,14 @@
 {
-  "name": "wiz-lights-server",
+  "name": "thor",
   "version": "1.0.0",
-  "description": "Server to control Philips WiZ lights with rhythm support",
-  "main": "dist/server.js",
-  "type": "module",
+  "private": true,
   "scripts": {
-    "dev": "npm run build && npm run server:watch",
-    "server": "tsc && nodemon dist/server.js",
-    "server:watch": "tsc && nodemon dist/server.js",
-    "build": "tsc && cd client && npm run build",
-    "start": "npm run build && node dist/server.js",
-    "install-client": "cd client && npm install",
-    "postinstall": "npm run install-client"
-  },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "express": "^4.18.2",
-    "node-cron": "^3.0.3"
-  },
-  "devDependencies": {
-    "@types/cors": "^2.8.0",
-    "@types/express": "^4.17.0",
-    "@types/node": "^20.0.0",
-    "concurrently": "^9.2.0",
-    "nodemon": "^3.0.1",
-    "typescript": "^5.0.0"
-  },
-  "keywords": [
-    "wiz",
-    "lights",
-    "philips",
-    "rhythm",
-    "api"
-  ],
-  "author": "Your Name",
-  "license": "MIT"
+    "install:all": "npm install --prefix server && npm install --prefix frontend",
+    "dev:server": "npm run dev --prefix server",
+    "dev:frontend": "npm start --prefix frontend",
+    "build:server": "npm run build --prefix server",
+    "build:frontend": "npm run build --prefix frontend",
+    "build": "npm run build:server && npm run build:frontend",
+    "start": "npm run start --prefix server"
+  }
 }
