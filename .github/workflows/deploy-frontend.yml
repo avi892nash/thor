@@ -23,12 +23,15 @@ env:
   AWS_REGION: 'ap-south-1'
   S3_BUCKET: 'devshram.com'
   S3_PREFIX: 'projects/thor'
+  CLOUDFRONT_DISTRIBUTION_ID: 'E2RU8A6DN1OCFF'
 
 jobs:
   # Job 1: Build and Test
   build:
     name: Build & Test
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
     defaults:
       run:
         working-directory: frontend
@@ -43,6 +46,10 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
         run: npm ci
@@ -59,6 +66,7 @@ jobs:
         env:
           REACT_APP_API_URL: ${{ secrets.API_URL || 'https://thor-api.devshram.in' }}
           REACT_APP_API_KEY: ${{ secrets.API_KEY }}
+          REACT_APP_VERSION: ${{ steps.version.outputs.VERSION }}
           CI: false
         run: npm run build
 
@@ -187,11 +195,12 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy to S3
+      - name: Deploy versioned build to S3
         run: |
-          S3_DEST="s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}"
+          VERSION="${{ needs.build.outputs.version }}"
+          S3_DEST="s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/v${VERSION}"
 
-          echo "Deploying to $S3_DEST (ap-south-1)..."
+          echo "Deploying v${VERSION} to $S3_DEST..."
 
           # Sync static assets with long-term cache (hashed filenames)
           aws s3 sync build/ "$S3_DEST" \
@@ -200,7 +209,7 @@ jobs:
             --exclude "index.html" \
             --exclude "*.json"
 
-          # Upload index.html with no-cache (entry point must always be fresh)
+          # Upload index.html with no-cache
           aws s3 cp build/index.html "$S3_DEST/index.html" \
             --cache-control "no-cache,no-store,must-revalidate"
 
@@ -211,24 +220,94 @@ jobs:
               --cache-control "no-cache,no-store,must-revalidate"
           done
 
-          echo "Deployment to $S3_DEST complete!"
+          echo "Versioned build deployed to $S3_DEST"
 
-      - name: Invalidate CloudFront cache (if configured)
-        if: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID != '' }}
+      - name: Upload loader index.html
         run: |
-          echo "Invalidating CloudFront cache..."
+          VERSION="${{ needs.build.outputs.version }}"
+          API_URL="${{ secrets.API_URL || 'https://thor-api.devshram.in' }}"
+
+          cat > /tmp/index.html << LOADER
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Thor</title>
+            <style>
+              *{margin:0;padding:0;box-sizing:border-box}
+              body{background:#0f172a;color:#f1f5f9;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+              .card{text-align:center;padding:2rem;max-width:400px}
+              h1{font-size:2rem;font-weight:700;margin-bottom:.5rem;color:#e2e8f0}
+              .status{font-size:1rem;color:#94a3b8;margin-bottom:1.5rem}
+              .dot{display:inline-block;animation:blink 1.2s infinite}
+              .dot:nth-child(2){animation-delay:.2s}
+              .dot:nth-child(3){animation-delay:.4s}
+              @keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+              .error{background:#450a0a;border:1px solid #7f1d1d;border-radius:.75rem;padding:1.25rem;color:#fca5a5}
+              .error h2{font-size:1.1rem;margin-bottom:.5rem;color:#f87171}
+              .error p{font-size:.875rem;margin-bottom:1rem;color:#fca5a5}
+              button{background:#1e40af;color:#fff;border:none;padding:.6rem 1.5rem;border-radius:.5rem;cursor:pointer;font-size:.875rem}
+              button:hover{background:#1d4ed8}
+              .version{font-size:.75rem;color:#475569;margin-top:1.5rem}
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h1>Thor</h1>
+              <div id="loading">
+                <p class="status">Connecting<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p>
+              </div>
+              <div id="error" style="display:none">
+                <div class="error">
+                  <h2>Backend Offline</h2>
+                  <p id="error-msg">Could not reach the Thor server. Make sure it is running on your local network.</p>
+                  <button onclick="load()">Retry</button>
+                </div>
+              </div>
+              <p class="version">loader v${VERSION}</p>
+            </div>
+            <script>
+              const API = '${API_URL}';
+              function load() {
+                document.getElementById('loading').style.display = '';
+                document.getElementById('error').style.display = 'none';
+                fetch(API + '/frontend', { signal: AbortSignal.timeout(8000) })
+                  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+                  .then(d => { window.location.replace(d.url); })
+                  .catch(e => {
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('error').style.display = '';
+                    document.getElementById('error-msg').textContent = e.message || 'Could not reach the Thor server.';
+                  });
+              }
+              load();
+            </script>
+          </body>
+          </html>
+          LOADER
+
+          aws s3 cp /tmp/index.html \
+            "s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate" \
+            --content-type "text/html"
+
+          echo "Loader uploaded to s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/index.html"
+
+      - name: Invalidate CloudFront cache
+        run: |
           aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/*"
-          echo "CloudFront invalidation initiated!"
+            --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/${{ env.S3_PREFIX }}/*"
 
       - name: Deployment summary
         run: |
+          VERSION="${{ needs.build.outputs.version }}"
           echo "========================================="
-          echo "DEPLOYMENT COMPLETE"
+          echo "DEPLOYMENT COMPLETE  v${VERSION}"
           echo "========================================="
-          echo "S3:          s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}"
-          echo "Region:      ap-south-1"
-          echo "Frontend:    ${{ secrets.FRONTEND_URL || 'https://thor.devshram.in' }}"
-          echo "API:         ${{ secrets.API_URL || 'https://thor-api.devshram.in' }}"
+          echo "Loader:   s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/index.html"
+          echo "App:      s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/v${VERSION}/"
+          echo "Region:   ap-south-1"
+          echo "API:      ${{ secrets.API_URL || 'https://thor-api.devshram.in' }}"
           echo "========================================="

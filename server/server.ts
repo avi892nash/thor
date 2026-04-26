@@ -213,8 +213,15 @@ app.get('/health', (_req: Request, res: Response) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     security: isSecurityEnabled() ? 'enabled' : 'disabled',
-    version: '1.0.0'
+    version: process.env['npm_package_version'] || '1.0.0'
   });
+});
+
+// Frontend URL — returns the versioned frontend URL for the loader (no auth required)
+app.get('/frontend', (_req: Request, res: Response) => {
+  const baseUrl = process.env['FRONTEND_BASE_URL'] || 'https://devshram.com/projects/thor';
+  const version = process.env['npm_package_version'] || '1.0.0';
+  res.json({ url: `${baseUrl}/v${version}/`, version });
 });
 
 // Get network information

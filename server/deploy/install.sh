@@ -43,7 +43,8 @@ REPO_URL="https://github.com/avi892nash/thor.git"
 ask CF_API_TOKEN   "Cloudflare API token (Tunnel:Edit + DNS:Edit)" ""
 ask CF_TUNNEL_NAME "Cloudflare tunnel name"           "thor-api"
 ask CF_SUBDOMAIN   "Public subdomain (e.g. thor-api.devshram.in)"  ""
-ask ALLOWED_ORIGINS "Frontend URL (CORS origin)"     "https://thor.devshram.in"
+ask ALLOWED_ORIGINS    "Frontend URL (CORS origin)"      "https://thor.devshram.in"
+ask FRONTEND_BASE_URL  "Frontend base URL (S3/CF path)"  "https://devshram.com/projects/thor"
 
 NODE_VERSION="${NODE_VERSION:-20}"
 APP_DIR="/opt/thor"
@@ -126,6 +127,7 @@ NODE_ENV=production
 PORT=3001
 THOR_API_KEY=${API_KEY}
 ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+FRONTEND_BASE_URL=${FRONTEND_BASE_URL}
 EOF
 chmod 600 "$APP_DIR/.env"
 chown "$APP_USER:$APP_USER" "$APP_DIR/.env"
