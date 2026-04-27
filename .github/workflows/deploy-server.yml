@@ -1,0 +1,107 @@
+name: Build & Release Server (.deb)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/deploy-server.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    name: Build .deb and publish release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Build TypeScript
+        working-directory: server
+        run: npm run build
+
+      - name: Embed commit SHA
+        run: echo "${{ github.sha }}" > server/dist/.version
+
+      - name: Stage package contents
+        run: |
+          VERSION=$(node -p "require('./server/package.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+          STAGING=$(mktemp -d)
+          echo "STAGING=$STAGING" >> $GITHUB_ENV
+
+          # DEBIAN metadata
+          cp -r server/package/DEBIAN "$STAGING/DEBIAN"
+          chmod 755 "$STAGING/DEBIAN/postinst" "$STAGING/DEBIAN/prerm"
+
+          # Patch version into control file
+          sed -i "s/__VERSION__/$VERSION/" "$STAGING/DEBIAN/control"
+
+          # App files
+          mkdir -p "$STAGING/usr/lib/thor-server"
+          cp -r server/dist              "$STAGING/usr/lib/thor-server/dist"
+          cp    server/package.json      "$STAGING/usr/lib/thor-server/package.json"
+          cp    server/package-lock.json "$STAGING/usr/lib/thor-server/package-lock.json"
+
+          # Auto-update script
+          mkdir -p "$STAGING/usr/bin"
+          cp server/package/usr/bin/thor-server-update "$STAGING/usr/bin/thor-server-update"
+          chmod 755 "$STAGING/usr/bin/thor-server-update"
+
+          # Default rooms template
+          mkdir -p "$STAGING/usr/share/thor-server"
+          cp server/package/usr/share/thor-server/rooms.json.default \
+             "$STAGING/usr/share/thor-server/rooms.json.default"
+
+          # Config directory placeholder
+          mkdir -p "$STAGING/etc/thor-server"
+
+          # systemd units
+          mkdir -p "$STAGING/lib/systemd/system"
+          cp server/package/lib/systemd/system/thor-server.service  "$STAGING/lib/systemd/system/"
+          cp server/package/lib/systemd/system/thor-update.service  "$STAGING/lib/systemd/system/"
+          cp server/package/lib/systemd/system/thor-update.timer    "$STAGING/lib/systemd/system/"
+
+      - name: Build .deb
+        run: |
+          DEB_NAME="thor-server_${{ env.VERSION }}_all.deb"
+          dpkg-deb --build "${{ env.STAGING }}" "$DEB_NAME"
+          echo "DEB_NAME=$DEB_NAME" >> $GITHUB_ENV
+
+          DEB_SHA256=$(sha256sum "$DEB_NAME" | cut -d' ' -f1)
+          echo "DEB_SHA256=$DEB_SHA256" >> $GITHUB_ENV
+
+          echo "Built: $DEB_NAME  ($DEB_SHA256)"
+
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete server-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create server-latest \
+            --title "Server v${{ env.VERSION }}" \
+            --notes "sha:${{ github.sha }} deb_sha256:${{ env.DEB_SHA256 }}" \
+            --latest=false \
+            "${{ env.DEB_NAME }}"
+
+          echo ""
+          echo "Release published:"
+          echo "  Version:    ${{ env.VERSION }}"
+          echo "  SHA:        ${{ github.sha }}"
+          echo "  deb SHA256: ${{ env.DEB_SHA256 }}"
+          echo "  Asset:      ${{ env.DEB_NAME }}"

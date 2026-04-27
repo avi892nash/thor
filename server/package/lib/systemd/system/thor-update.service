@@ -1,0 +1,11 @@
+[Unit]
+Description=Thor Server - Check and apply update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/thor-server-update
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=thor-update

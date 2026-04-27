@@ -1,0 +1,8 @@
+Package: thor-server
+Version: __VERSION__
+Architecture: all
+Maintainer: Avinash Verma <avihsan8922@gmail.com>
+Depends: nodejs (>= 18)
+Description: Thor smart home server for Philips WiZ lights
+ Controls Philips WiZ lights over local network. Exposes a REST API
+ and optionally connects via Cloudflare Tunnel for remote access.

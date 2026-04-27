@@ -1,0 +1,11 @@
+[Unit]
+Description=Thor Server - Auto-update poll timer
+Requires=thor-update.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=thor-update.service
+
+[Install]
+WantedBy=timers.target

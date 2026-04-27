@@ -4,57 +4,65 @@ Smart home server for controlling Philips WiZ lights over your local network, wi
 
 ## Server Install (DietPi / Raspberry Pi)
 
-Run this on your device — it will ask for your Cloudflare details and set everything up:
+### Prerequisites
+
+- Node.js 18+ (`sudo apt install nodejs`)
+- `curl` and `apt`
+
+### Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/avi892nash/thor/main/server/deploy/install.sh | sudo bash
+# Download the latest .deb from GitHub Releases
+curl -fsSL https://github.com/avi892nash/thor/releases/download/server-latest/thor-server_1.0.0_all.deb \
+  -o /tmp/thor.deb
+
+# Install (apt handles dependencies)
+sudo apt install /tmp/thor.deb
 ```
 
-You'll be prompted for:
+The installer will:
+- Create a `thor` system user
+- Generate a random API key and save it to `/etc/thor-server/.env`
+- Seed an empty `rooms.json` at `/etc/thor-server/data/rooms.json`
+- Start the `thor-server` systemd service on port `3001`
+- Enable the auto-update timer
 
-| Prompt | Example |
-|---|---|
-| Cloudflare API token | `your_token` (needs Tunnel:Edit + DNS:Edit) |
-| Tunnel name | `thor-api` |
-| Public subdomain | `thor-api.devshram.in` |
-| Frontend URL (CORS) | `https://thor.devshram.in` |
+Your API key is printed at the end of the install — save it for the frontend config.
 
-After install the server auto-updates every 5 minutes by polling `main`.
+### Auto-update
 
-### What it does
+The server checks GitHub Releases every 5 minutes and installs a new `.deb` automatically when a new version is available. No action needed.
 
-- Installs Node.js 20
-- Clones the repo, builds the TypeScript server
-- Creates a `thor-server` systemd service
-- Sets up a Cloudflare Tunnel (no port forwarding needed)
-- Adds a cron job to auto-pull and rebuild on new commits
+### Cloudflare Tunnel (remote access)
+
+To expose the server over the internet without port forwarding, run the tunnel setup script after installing:
+
+```bash
+sudo /opt/thor/repo/server/deploy/setup-cloudflare-tunnel.sh
+```
+
+You'll be prompted for your Cloudflare API token, tunnel name, and public subdomain.
 
 ### Useful commands
 
 ```bash
-journalctl -u thor-server -f        # server logs
-journalctl -u cloudflared -f        # tunnel logs
-tail -f /var/log/thor-update.log    # auto-update logs
+systemctl status thor-server            # service status
+journalctl -u thor-server -f            # live server logs
+cat /etc/thor-server/.env               # view config / API key
+sudo thor-server-update                 # force update check now
 ```
 
 ### Manual update
 
 ```bash
-sudo /opt/thor/repo/server/deploy/update.sh
+curl -fsSL https://github.com/avi892nash/thor/releases/download/server-latest/thor-server_1.0.0_all.deb \
+  -o /tmp/thor.deb && sudo apt install /tmp/thor.deb
 ```
+
+---
 
 ## Frontend Deploy (GitHub Actions → S3)
 
-Add these secrets to your GitHub repo (**Settings → Secrets → Actions**):
+Push to `main` deploys automatically when `frontend/` files change.
 
-| Secret | Value |
-|---|---|
-| `AWS_ACCESS_KEY_ID` | IAM access key |
-| `AWS_SECRET_ACCESS_KEY` | IAM secret key |
-| `S3_BUCKET` | e.g. `thor-frontend-devshram` |
-| `API_URL` | `https://thor-api.devshram.in` |
-| `API_KEY` | from `/opt/thor/.api_key` on the device |
-| `FRONTEND_URL` | `https://thor.devshram.in` |
-| `CLOUDFRONT_DISTRIBUTION_ID` | *(optional)* |
-
-Push to `main` deploys automatically.
+The frontend is versioned — each release uploads to `s3://devshram.com/projects/thor/v{version}/` and a loader `index.html` at `projects/thor/index.html` fetches the correct version URL from the backend.

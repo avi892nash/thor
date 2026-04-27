@@ -9,9 +9,9 @@
                     │                       │
                     ▼                       ▼
         ┌───────────────────┐   ┌───────────────────────┐
-        │  thor.devshram.in │   │ thor-api.devshram.in  │
-        │      (S3/CF)      │   │   (Raspberry Pi)      │
-        │     Frontend      │   │      Backend          │
+        │  devshram.com/    │   │  thor-api.devshram.in │
+        │  projects/thor/   │   │    (DietPi / RPi)     │
+        │  (S3 + CloudFront)│   │   thor-server .deb    │
         └───────────────────┘   └───────────────────────┘
                                           │
                                           ▼
@@ -21,194 +21,90 @@
                                 └───────────────────┘
 ```
 
+---
+
+## Server Deployment (.deb package)
+
+### First install
+
+```bash
+curl -fsSL https://github.com/avi892nash/thor/releases/download/server-latest/thor-server_1.0.0_all.deb \
+  -o /tmp/thor.deb
+sudo apt install /tmp/thor.deb
+```
+
+- Creates system user `thor`
+- Installs to `/usr/lib/thor-server/`
+- Config at `/etc/thor-server/.env` (preserved on upgrade)
+- Data at `/etc/thor-server/data/rooms.json` (never overwritten on upgrade)
+- Starts `thor-server.service` on port `3001`
+- Enables `thor-update.timer` (checks for updates every 5 min)
+
+### Auto-update flow
+
+Every 5 minutes, `thor-update.timer` runs `thor-server-update`:
+1. Fetches the `server-latest` GitHub Release metadata
+2. Compares commit SHA in release notes vs `/usr/lib/thor-server/dist/.version`
+3. If different: downloads the new `.deb`, verifies SHA256, runs `apt install`
+4. The service restarts automatically via `postinst`
+
+### Config
+
+Edit `/etc/thor-server/.env` to change any setting:
+
+```ini
+NODE_ENV=production
+PORT=3001
+THOR_API_KEY=<generated at install>
+ALLOWED_ORIGINS=https://thor.devshram.in
+FRONTEND_BASE_URL=https://devshram.com/projects/thor
+DATA_DIR=/etc/thor-server/data
+```
+
+After editing: `sudo systemctl restart thor-server`
+
+### Cloudflare Tunnel
+
+```bash
+sudo /opt/thor/repo/server/deploy/setup-cloudflare-tunnel.sh
+```
+
+Exposes port `3001` at your chosen subdomain (e.g. `thor-api.devshram.in`) without port forwarding.
+
+### Useful commands
+
+```bash
+systemctl status thor-server            # service status
+journalctl -u thor-server -f            # live logs
+systemctl status thor-update.timer      # auto-update timer
+sudo thor-server-update                 # force update check now
+cat /etc/thor-server/.env               # view config / API key
+```
+
+---
+
 ## Frontend Deployment (S3 + CloudFront)
 
-### Prerequisites
-- AWS Account
-- S3 Bucket configured for static hosting
-- (Optional) CloudFront distribution
-- GitHub repository with Actions enabled
+Push to `main` triggers the `deploy-frontend.yml` workflow when `frontend/` files change.
 
-### GitHub Secrets Required
+### What the workflow does
 
-Set these in your repository Settings > Secrets and variables > Actions:
+1. Builds the React app with `REACT_APP_VERSION` injected from `package.json`
+2. Uploads static assets to `s3://devshram.com/projects/thor/v{version}/`
+3. Generates a loader `index.html` that calls `GET /frontend` on the backend to fetch the versioned URL, then redirects
+4. Uploads the loader to `s3://devshram.com/projects/thor/index.html`
+5. Invalidates the CloudFront distribution at `/projects/thor/*`
 
-| Secret | Description | Example |
-|--------|-------------|---------|
-| `AWS_ACCESS_KEY_ID` | AWS IAM access key | `AKIA...` |
-| `AWS_SECRET_ACCESS_KEY` | AWS IAM secret key | `wJal...` |
-| `S3_BUCKET` | S3 bucket name | `thor-frontend-devshram` |
-| `API_URL` | Backend API URL | `https://thor-api.devshram.in` |
-| `API_KEY` | API authentication key | `your-32-byte-hex-key` |
-| `FRONTEND_URL` | Frontend URL | `https://thor.devshram.in` |
-| `CLOUDFRONT_DISTRIBUTION_ID` | (Optional) CF distribution ID | `E1234567890` |
+### Versioning
 
-> **Note**: The `API_KEY` is generated during Raspberry Pi setup. Copy it from the setup output or from `/opt/thor/.api_key` on your Pi.
+- Each frontend release lives at a permanent versioned path (`/projects/thor/v1.0.0/`)
+- The loader at `/projects/thor/` always points to the version the backend advertises via `GET /frontend`
+- This keeps backend and frontend versions in sync
 
-### GitHub Variables (Optional)
+### Authentication
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `AWS_REGION` | AWS region | `ap-south-1` |
+Uses AWS OIDC (no stored keys). The IAM role `avi89nash_s3_upload` is trusted by this repository.
 
-### Deployment
+### Manual deploy
 
-Frontend automatically deploys on push to `main` branch (when `frontend/` files change).
-
-Manual deployment: Go to Actions > Deploy Frontend to S3 > Run workflow
-
----
-
-## Server Deployment (Raspberry Pi + Cloudflare Tunnel)
-
-### Prerequisites
-- Raspberry Pi 4 (recommended) with Raspberry Pi OS
-- Cloudflare account with your domain (devshram.in)
-- SSH access to the Pi
-
-### Quick Setup
-
-1. **SSH into your Raspberry Pi:**
-   ```bash
-   ssh pi@your-pi-ip
-   ```
-
-2. **Clone and run setup scripts:**
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/thor.git
-   cd thor/server/deploy
-
-   # Step 1: Install and configure Thor server
-   sudo ./setup-rpi.sh
-
-   # Step 2: Setup Cloudflare Tunnel (exposes to internet)
-   sudo ./setup-cloudflare-tunnel.sh
-   ```
-
-3. **During tunnel setup, you'll be asked for:**
-   - Cloudflare login (browser will open)
-   - Tunnel name (e.g., `thor-api`)
-   - Subdomain (e.g., `thor-api.devshram.in`)
-
-4. **Save the API key** shown at the end - you'll need it for frontend deployment.
-
-### How Cloudflare Tunnel Works
-
-```
-┌─────────────────┐      ┌──────────────────┐      ┌─────────────────┐
-│   Frontend      │      │   Cloudflare     │      │  Raspberry Pi   │
-│   (S3/CF)       │─────▶│   Edge Network   │◀─────│  (cloudflared)  │
-│                 │      │                  │      │                 │
-│ thor.devshram.in│      │ HTTPS/Security   │      │ localhost:3001  │
-└─────────────────┘      └──────────────────┘      └─────────────────┘
-                              ▲
-                              │ Outbound connection
-                              │ (no port forwarding needed!)
-```
-
-**Benefits:**
-- No port forwarding on your router
-- Automatic HTTPS (Cloudflare handles SSL)
-- DDoS protection included
-- Works behind NAT/CGNAT
-- No static IP needed
-
-### DNS Configuration
-
-Cloudflare Tunnel automatically creates the DNS record. Just ensure your domain is on Cloudflare:
-
-| Type | Name | Content | Proxy |
-|------|------|---------|-------|
-| CNAME | thor-api | (auto-created by tunnel) | Proxied |
-
-### Alternative: Manual Nginx Setup (if not using Cloudflare Tunnel)
-
-<details>
-<summary>Click to expand Nginx setup instructions</summary>
-
-1. **Install Nginx and Certbot:**
-   ```bash
-   sudo apt install nginx certbot python3-certbot-nginx -y
-   ```
-
-2. **Copy nginx config:**
-   ```bash
-   sudo cp /opt/thor/repo/server/deploy/nginx.conf /etc/nginx/sites-available/thor-api
-   sudo ln -s /etc/nginx/sites-available/thor-api /etc/nginx/sites-enabled/
-   ```
-
-3. **Edit the config** to match your domain:
-   ```bash
-   sudo nano /etc/nginx/sites-available/thor-api
-   ```
-
-4. **Get SSL certificate:**
-   ```bash
-   sudo certbot --nginx -d thor-api.devshram.in
-   ```
-
-5. **Point DNS A record** to your Pi's public IP and forward port 443.
-
-</details>
-
-### Updating the Server
-
-```bash
-cd /opt/thor/repo/server/deploy
-sudo ./update.sh
-```
-
-### Useful Commands
-
-```bash
-# View server logs
-sudo journalctl -u thor-server -f
-
-# Restart server
-sudo systemctl restart thor-server
-
-# Check server status
-sudo systemctl status thor-server
-
-# View tunnel logs
-sudo journalctl -u cloudflared -f
-
-# Check tunnel status
-cloudflared tunnel info thor-api
-
-# Restart tunnel
-sudo systemctl restart cloudflared
-
-# View API key
-cat /opt/thor/.api_key
-```
-
----
-
-## Validation Checks
-
-The CI/CD pipeline includes these checks:
-
-1. **Build validation** - Ensures index.html and static assets exist
-2. **Sensitive data check** - Scans for accidental secrets in build
-3. **API health check** - Verifies backend is reachable before deploy
-
----
-
-## Troubleshooting
-
-### Frontend not loading
-- Check S3 bucket policy allows public read
-- Verify CloudFront invalidation completed
-- Check browser console for CORS errors
-
-### API connection issues
-- Verify Raspberry Pi is accessible from internet
-- Check nginx is running: `sudo systemctl status nginx`
-- Verify SSL certificate: `sudo certbot certificates`
-- Check firewall: `sudo ufw status`
-
-### WiZ lights not responding
-- Ensure Pi is on the same network as lights
-- Check UDP port 38899 is not blocked
-- Verify light IPs in rooms.json are correct
+Go to **Actions → Deploy Frontend → Run workflow**.

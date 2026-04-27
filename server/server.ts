@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { WizLightManager } from './lib/wizLightManager.js';
 import { RoomsData, NetworkInterface } from './shared/types.js';
+import { logger } from './lib/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -116,10 +117,14 @@ const timingSafeEqual = (a: string, b: string): boolean => {
 // Apply API key middleware to all /api routes
 app.use('/api', authenticateApiKey);
 
-// Request logging middleware (for debugging)
-app.use((req: Request, _res: Response, next: NextFunction) => {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${req.method} ${req.path}`);
+// Request logging middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const ms = Date.now() - start;
+    const level = res.statusCode >= 500 ? 'error' : 'info';
+    logger[level](`${req.method} ${req.path} → ${res.statusCode} (${ms}ms)`);
+  });
   next();
 });
 
@@ -127,14 +132,17 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 let roomsData: RoomsData = { rooms: [] };
 let wizLightManager = new WizLightManager();
 
+// Resolve data directory — use DATA_DIR env var (set by .deb install) or fallback to local
+const dataDir = process.env['DATA_DIR'] || join(__dirname, '../data');
+
 // Load rooms data from JSON file
 const loadRoomsData = async (): Promise<void> => {
   try {
-    const roomsPath = join(__dirname, '../data/rooms.json');
+    const roomsPath = join(dataDir, 'rooms.json');
     const data = await fs.readFile(roomsPath, 'utf8');
     roomsData = JSON.parse(data);
   } catch (error) {
-    console.warn('Could not load rooms data, using empty rooms:', error);
+    logger.warn('Could not load rooms data, using empty rooms', error);
     roomsData = { rooms: [] };
   }
 };
@@ -251,11 +259,11 @@ app.post('/api/discover', async (req: Request<object, object, DiscoveryRequest>,
     // Use dynamic broadcast address if no subnet provided
     const defaultSubnet = getPrimaryBroadcastAddress();
     const { subnet = defaultSubnet, timeout = 3000 } = req.body;
-    console.log(`Discovering lights on subnet ${subnet}...`);
+    logger.info(`Discovering lights on subnet ${subnet}...`);
     
     const devices = await wizLightManager.discoverDevices(timeout, subnet);
     
-    console.log(`Found ${devices.length} lights`);
+    logger.info(`Found ${devices.length} lights`);
     
     
     res.json({
@@ -265,7 +273,7 @@ app.post('/api/discover', async (req: Request<object, object, DiscoveryRequest>,
       subnet: subnet
     });
   } catch (error: unknown) {
-    console.error('Discovery error:', error);
+    logger.error('Discovery error', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -295,7 +303,7 @@ const controlAllLights = async (_req: Request, res: Response, action: string, st
       }
     }
     
-    console.log(`${action} request for lights:`, allLights.map(l => l.ip));
+    logger.info(`${action} all lights`, { ips: allLights.map(l => l.ip) });
     
     // Use batch operations from WizLightManager
     const results = state ? 
@@ -306,7 +314,7 @@ const controlAllLights = async (_req: Request, res: Response, action: string, st
     const failedResults = results.filter(r => !r.success);
     
     if (failedResults.length > 0) {
-      console.log('Some lights failed:', failedResults);
+      logger.warn('Some lights failed', failedResults);
     }
     
     res.json({
@@ -319,7 +327,7 @@ const controlAllLights = async (_req: Request, res: Response, action: string, st
       message: `${successCount}/${results.length} lights ${action === 'turnOn' ? 'turned on' : 'turned off'} successfully`
     });
   } catch (error: unknown) {
-    console.error(`All lights ${action} error:`, error);
+    logger.error(`All lights ${action} error`, error);
     res.status(500).json({ 
       success: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 
@@ -344,7 +352,7 @@ const controlLight = async (req: Request, res: Response, action: string, stateVa
       return;
     }
     
-    console.log(`${action} request for light ${ip}`);
+    logger.info(`${action} light ${ip}`);
     
     // Get or add light to manager
     let light = wizLightManager.getLight(ip);
@@ -368,15 +376,15 @@ const controlLight = async (req: Request, res: Response, action: string, stateVa
         });
       }
     } catch (commandError) {
-      console.error(`Command failed for light ${ip}:`, commandError);
-      res.json({ 
-        success: false, 
-        ip, 
+      logger.error(`Command failed for light ${ip}`, commandError);
+      res.json({
+        success: false,
+        ip,
         error: commandError instanceof Error ? commandError.message : 'Command failed'
       });
     }
   } catch (error: unknown) {
-    console.error(`Error controlling light ${req.params['ip']}:`, error);
+    logger.error(`Error controlling light ${req.params['ip']}`, error);
     res.status(500).json({ 
       success: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 
@@ -409,7 +417,7 @@ app.post('/api/lights/:ip/update', async (req: Request, res: Response) => {
       return;
     }
     
-    console.log(`Updating light ${ip} with properties:`, req.body);
+    logger.info(`Updating light ${ip}`, req.body);
     
     // Get or add light to manager
     let light = wizLightManager.getLight(ip);
@@ -443,16 +451,16 @@ app.post('/api/lights/:ip/update', async (req: Request, res: Response) => {
         });
       }
     } catch (commandError) {
-      console.error(`Command failed for light ${ip}:`, commandError);
-      res.json({ 
-        success: false, 
-        ip, 
+      logger.error(`Command failed for light ${ip}`, commandError);
+      res.json({
+        success: false,
+        ip,
         error: commandError instanceof Error ? commandError.message : 'Command failed',
         properties: req.body
       });
     }
   } catch (error: unknown) {
-    console.error(`Error updating light ${req.params['ip']}:`, error);
+    logger.error(`Error updating light ${req.params['ip']}`, error);
     res.status(500).json({ 
       success: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 
@@ -504,7 +512,7 @@ app.get('/api/lights/:ip/status', async (req: Request, res: Response) => {
       });
     }
   } catch (error: unknown) {
-    console.error(`Error getting status for light ${req.params['ip']}:`, error);
+    logger.error(`Error getting status for light ${req.params['ip']}`, error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -544,7 +552,7 @@ app.post('/api/lights/status', async (req: Request, res: Response) => {
 
     res.json({ success: true, results });
   } catch (error: unknown) {
-    console.error('Error getting batch status:', error);
+    logger.error('Error getting batch status', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -555,7 +563,7 @@ app.post('/api/lights/status', async (req: Request, res: Response) => {
 // Room management API
 app.post('/api/rooms', async (req: Request, res: Response) => {
   try {
-    const roomsPath = join(__dirname, '../data/rooms.json');
+    const roomsPath = join(dataDir, 'rooms.json');
     await fs.writeFile(roomsPath, JSON.stringify(req.body, null, 2));
 
     // Update global roomsData variable
@@ -563,7 +571,7 @@ app.post('/api/rooms', async (req: Request, res: Response) => {
 
     res.json({ success: true, message: 'Rooms saved successfully' });
   } catch (error: unknown) {
-    console.error('Error writing rooms file:', error);
+    logger.error('Error writing rooms file', error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -577,7 +585,7 @@ app.get('/api/rooms', (_req: Request, res: Response) => {
 
 // Error handling middleware
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('Error:', err);
+  logger.error('Unhandled error', err);
   res.status(500).json({
     success: false,
     error: 'Internal server error'
@@ -587,11 +595,9 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-  console.log('Shutting down gracefully...');
-  
-  // Close HTTP server
+  logger.info('Shutting down gracefully...');
   server.close(() => {
-    console.log('Server closed');
+    logger.info('Server closed');
     process.exit(0);
   });
 });
@@ -599,11 +605,7 @@ process.on('SIGTERM', async () => {
 const PORT = process.env['PORT'] || 3001;
 
 server.listen(PORT, async () => {
-  console.log(`🚀 WiZ Lights Server running on port ${PORT}`);
-  console.log('🔍 Use POST /api/discover to find lights on your network');
-  console.log('💡 Use /api/lights/* endpoints for light management');
-  
-  // Load rooms data on startup
+  logger.info(`Thor server started on port ${PORT} — logging to ${logger.logFile}`);
   await loadRoomsData();
-  console.log(`📋 Loaded ${roomsData.rooms.length} rooms from JSON`);
+  logger.info(`Loaded ${roomsData.rooms.length} rooms from JSON`);
 });

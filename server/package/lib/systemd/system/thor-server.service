@@ -1,0 +1,23 @@
+[Unit]
+Description=Thor Smart Home Server
+After=network.target
+
+[Service]
+Type=simple
+User=thor
+WorkingDirectory=/usr/lib/thor-server
+EnvironmentFile=/etc/thor-server/.env
+ExecStart=/usr/bin/env node dist/server.js
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=thor-server
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/thor-server/data /etc/thor-server/.env /var/log/thor-server
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

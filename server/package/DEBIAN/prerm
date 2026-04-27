@@ -1,0 +1,14 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+  remove|purge)
+    # Full removal — stop and disable everything
+    systemctl stop thor-server thor-update.timer 2>/dev/null || true
+    systemctl disable thor-server thor-update.timer 2>/dev/null || true
+    ;;
+  upgrade|deconfigure)
+    # Upgrade — stop service only; postinst will restart it after new files land
+    systemctl stop thor-server 2>/dev/null || true
+    ;;
+esac

@@ -1,0 +1,71 @@
+#!/bin/bash
+set -e
+
+# Verify Node.js is installed and meets minimum version
+if ! command -v node &>/dev/null; then
+  echo "ERROR: nodejs not found. Install it first:"
+  echo "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -"
+  echo "  sudo apt install -y nodejs"
+  exit 1
+fi
+NODE_MAJOR=$(node -e "process.stdout.write(process.versions.node.split('.')[0])")
+if [ "$NODE_MAJOR" -lt 18 ]; then
+  echo "ERROR: Node.js >= 18 required (found $(node -v))"
+  exit 1
+fi
+
+# Create system user if absent
+if ! id thor &>/dev/null; then
+  useradd -r -s /bin/false -d /etc/thor-server thor
+fi
+
+# Create data directory and seed rooms.json only on first install
+mkdir -p /etc/thor-server/data
+if [ ! -f /etc/thor-server/data/rooms.json ]; then
+  cp /usr/share/thor-server/rooms.json.default /etc/thor-server/data/rooms.json
+fi
+chown -R thor:thor /etc/thor-server/data
+chmod 750 /etc/thor-server/data
+
+# Create log directory
+mkdir -p /var/log/thor-server
+chown thor:thor /var/log/thor-server
+chmod 750 /var/log/thor-server
+
+# Install production dependencies
+cd /usr/lib/thor-server
+npm ci --omit=dev --quiet
+
+chown -R root:thor /usr/lib/thor-server
+chmod -R 755 /usr/lib/thor-server
+
+# Generate .env on first install only (conffiles preserves it on upgrade)
+if [ ! -f /etc/thor-server/.env ]; then
+  API_KEY=$(openssl rand -hex 32)
+  cat > /etc/thor-server/.env << EOF
+NODE_ENV=production
+PORT=3001
+THOR_API_KEY=${API_KEY}
+ALLOWED_ORIGINS=https://thor.devshram.in
+FRONTEND_BASE_URL=https://devshram.com/projects/thor
+DATA_DIR=/etc/thor-server/data
+LOG_DIR=/var/log/thor-server
+EOF
+  chmod 600 /etc/thor-server/.env
+  chown thor:thor /etc/thor-server/.env
+  echo ""
+  echo "================================================"
+  echo "  Thor installed!  API Key (save this):"
+  echo "  ${API_KEY}"
+  echo "  Stored at: /etc/thor-server/.env"
+  echo "================================================"
+  echo ""
+fi
+
+# Enable and start services (skip if systemd is not running, e.g. in chroot/container)
+if systemctl is-system-running --quiet 2>/dev/null || [ "$1" = "configure" ]; then
+  systemctl daemon-reload
+  systemctl enable thor-server thor-update.timer
+  systemctl restart thor-server
+  systemctl start thor-update.timer
+fi
