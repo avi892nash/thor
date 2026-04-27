@@ -1,0 +1,345 @@
+name: Thor CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'server/**'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18'
+  AWS_REGION: 'ap-south-1'
+  S3_BUCKET: 'devshram.com'
+  S3_PREFIX: 'projects/thor'
+  CLOUDFRONT_DISTRIBUTION_ID: 'E2RU8A6DN1OCFF'
+  AWS_ROLE_ARN: 'arn:aws:iam::532197675314:role/avi89nash_s3_upload'
+  API_URL: 'https://thor-api.devshram.in'
+  API_KEY: ''
+
+# ---------------------------------------------------------------------------
+# Detect which parts of the repo changed so jobs only run when relevant
+# ---------------------------------------------------------------------------
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      server: ${{ steps.filter.outputs.server }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/ci.yml'
+            server:
+              - 'server/**'
+              - '.github/workflows/ci.yml'
+
+# ---------------------------------------------------------------------------
+# FRONTEND PIPELINE
+# ---------------------------------------------------------------------------
+
+  frontend-build:
+    name: '[Frontend] Build'
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint --if-present
+        continue-on-error: true
+
+      - name: Test
+        run: npm test -- --passWithNoTests --watchAll=false
+        continue-on-error: true
+
+      - name: Build
+        env:
+          REACT_APP_API_URL: ${{ env.API_URL }}
+          REACT_APP_API_KEY: ${{ env.API_KEY }}
+          REACT_APP_VERSION: ${{ steps.version.outputs.VERSION }}
+          CI: false
+        run: npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build
+          retention-days: 1
+
+  frontend-validate:
+    name: '[Frontend] Validate'
+    runs-on: ubuntu-latest
+    needs: [changes, frontend-build]
+    if: needs.changes.outputs.frontend == 'true'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: build
+
+      - name: Check build output
+        run: |
+          [ -f build/index.html ] || { echo "ERROR: index.html missing"; exit 1; }
+          [ -d build/static ]     || { echo "ERROR: static/ missing";    exit 1; }
+          JS_COUNT=$(find build/static/js  -name "*.js"  | wc -l)
+          CSS_COUNT=$(find build/static/css -name "*.css" | wc -l)
+          [ "$JS_COUNT"  -gt 0 ] || { echo "ERROR: no JS files";  exit 1; }
+          [ "$CSS_COUNT" -gt 0 ] || { echo "ERROR: no CSS files"; exit 1; }
+          echo "Build OK — JS: $JS_COUNT  CSS: $CSS_COUNT"
+
+      - name: Scan for leaked secrets
+        run: |
+          if grep -rEi "password|secret|private_key|AWS_SECRET" build/ \
+               --include="*.js" --include="*.html"; then
+            echo "WARNING: potential sensitive data in build"
+          else
+            echo "No sensitive patterns found"
+          fi
+
+  frontend-health-check:
+    name: '[Frontend] API Health'
+    runs-on: ubuntu-latest
+    needs: [changes, frontend-build]
+    if: needs.changes.outputs.frontend == 'true'
+    steps:
+      - name: Check API reachability
+        run: |
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              "${{ env.API_URL }}/health" --connect-timeout 10 || echo "000")
+            [ "$STATUS" = "200" ] && { echo "API healthy (HTTP $STATUS)"; exit 0; }
+            echo "Attempt $i: HTTP $STATUS"
+            sleep 5
+          done
+          echo "WARNING: API unreachable — deployment continues"
+
+  frontend-deploy:
+    name: '[Frontend] Deploy to S3'
+    runs-on: ubuntu-latest
+    needs: [changes, frontend-build, frontend-validate, frontend-health-check]
+    if: needs.changes.outputs.frontend == 'true'
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: build
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy versioned build
+        run: |
+          VERSION="${{ needs.frontend-build.outputs.version }}"
+          DEST="s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/v${VERSION}"
+          echo "Deploying v${VERSION} → $DEST"
+
+          aws s3 sync build/ "$DEST" \
+            --delete \
+            --cache-control "max-age=31536000,public" \
+            --exclude "index.html" \
+            --exclude "*.json"
+
+          aws s3 cp build/index.html "$DEST/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate"
+
+          find build -name "*.json" | while read f; do
+            aws s3 cp "$f" "$DEST/${f#build/}" \
+              --cache-control "no-cache,no-store,must-revalidate"
+          done
+
+      - name: Upload loader index.html
+        run: |
+          VERSION="${{ needs.frontend-build.outputs.version }}"
+          cat > /tmp/index.html << LOADER
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Thor</title>
+            <style>
+              *{margin:0;padding:0;box-sizing:border-box}
+              body{background:#0f172a;color:#f1f5f9;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+              .card{text-align:center;padding:2rem;max-width:400px}
+              h1{font-size:2rem;font-weight:700;margin-bottom:.5rem;color:#e2e8f0}
+              .status{font-size:1rem;color:#94a3b8;margin-bottom:1.5rem}
+              .dot{display:inline-block;animation:blink 1.2s infinite}
+              .dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
+              @keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+              .error{background:#450a0a;border:1px solid #7f1d1d;border-radius:.75rem;padding:1.25rem;color:#fca5a5}
+              .error h2{font-size:1.1rem;margin-bottom:.5rem;color:#f87171}
+              .error p{font-size:.875rem;margin-bottom:1rem}
+              button{background:#1e40af;color:#fff;border:none;padding:.6rem 1.5rem;border-radius:.5rem;cursor:pointer;font-size:.875rem}
+              button:hover{background:#1d4ed8}
+              .version{font-size:.75rem;color:#475569;margin-top:1.5rem}
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h1>Thor</h1>
+              <div id="loading"><p class="status">Connecting<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p></div>
+              <div id="error" style="display:none">
+                <div class="error">
+                  <h2>Backend Offline</h2>
+                  <p id="error-msg">Could not reach the Thor server.</p>
+                  <button onclick="load()">Retry</button>
+                </div>
+              </div>
+              <p class="version">loader v${VERSION}</p>
+            </div>
+            <script>
+              const API='${{ env.API_URL }}';
+              function load(){
+                document.getElementById('loading').style.display='';
+                document.getElementById('error').style.display='none';
+                fetch(API+'/frontend',{signal:AbortSignal.timeout(8000)})
+                  .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+                  .then(d=>{window.location.replace(d.url);})
+                  .catch(e=>{
+                    document.getElementById('loading').style.display='none';
+                    document.getElementById('error').style.display='';
+                    document.getElementById('error-msg').textContent=e.message||'Could not reach the Thor server.';
+                  });
+              }
+              load();
+            </script>
+          </body>
+          </html>
+          LOADER
+
+          aws s3 cp /tmp/index.html \
+            "s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate" \
+            --content-type "text/html"
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/${{ env.S3_PREFIX }}/*"
+
+      - name: Summary
+        run: |
+          VERSION="${{ needs.frontend-build.outputs.version }}"
+          echo "Frontend v${VERSION} deployed"
+          echo "  Loader: s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/index.html"
+          echo "  App:    s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/v${VERSION}/"
+
+# ---------------------------------------------------------------------------
+# SERVER PIPELINE
+# ---------------------------------------------------------------------------
+
+  server-build-release:
+    name: '[Server] Build .deb & Release'
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Build TypeScript
+        working-directory: server
+        run: npm run build
+
+      - name: Embed commit SHA
+        run: echo "${{ github.sha }}" > server/dist/.version
+
+      - name: Stage package contents
+        run: |
+          VERSION=$(node -p "require('./server/package.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+          STAGING=$(mktemp -d)
+          echo "STAGING=$STAGING" >> $GITHUB_ENV
+
+          cp -r server/package/DEBIAN "$STAGING/DEBIAN"
+          chmod 755 "$STAGING/DEBIAN/postinst" "$STAGING/DEBIAN/prerm"
+          sed -i "s/__VERSION__/$VERSION/" "$STAGING/DEBIAN/control"
+
+          mkdir -p "$STAGING/usr/lib/thor-server"
+          cp -r server/dist              "$STAGING/usr/lib/thor-server/dist"
+          cp    server/package.json      "$STAGING/usr/lib/thor-server/package.json"
+          cp    server/package-lock.json "$STAGING/usr/lib/thor-server/package-lock.json"
+
+          mkdir -p "$STAGING/usr/bin"
+          cp server/package/usr/bin/thor-server-update "$STAGING/usr/bin/thor-server-update"
+          chmod 755 "$STAGING/usr/bin/thor-server-update"
+
+          mkdir -p "$STAGING/usr/share/thor-server"
+          cp server/package/usr/share/thor-server/rooms.json.default \
+             "$STAGING/usr/share/thor-server/rooms.json.default"
+
+          mkdir -p "$STAGING/etc/thor-server"
+
+          mkdir -p "$STAGING/lib/systemd/system"
+          cp server/package/lib/systemd/system/thor-server.service "$STAGING/lib/systemd/system/"
+          cp server/package/lib/systemd/system/thor-update.service  "$STAGING/lib/systemd/system/"
+          cp server/package/lib/systemd/system/thor-update.timer    "$STAGING/lib/systemd/system/"
+
+      - name: Build .deb
+        run: |
+          DEB_NAME="thor-server_${{ env.VERSION }}_all.deb"
+          dpkg-deb --build "${{ env.STAGING }}" "$DEB_NAME"
+          echo "DEB_NAME=$DEB_NAME" >> $GITHUB_ENV
+
+          DEB_SHA256=$(sha256sum "$DEB_NAME" | cut -d' ' -f1)
+          echo "DEB_SHA256=$DEB_SHA256" >> $GITHUB_ENV
+          echo "Built: $DEB_NAME ($DEB_SHA256)"
+
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete server-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create server-latest \
+            --title "Server v${{ env.VERSION }}" \
+            --notes "sha:${{ github.sha }} deb_sha256:${{ env.DEB_SHA256 }}" \
+            --latest=false \
+            "${{ env.DEB_NAME }}"
+          echo "Released server-latest (v${{ env.VERSION }}, sha: ${{ github.sha }})"
