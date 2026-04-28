@@ -27,8 +27,8 @@ jobs:
     name: Detect changes
     runs-on: ubuntu-latest
     outputs:
-      frontend: ${{ steps.filter.outputs.frontend }}
-      server: ${{ steps.filter.outputs.server }}
+      frontend: ${{ steps.result.outputs.frontend }}
+      server: ${{ steps.result.outputs.server }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -41,6 +41,16 @@ jobs:
             server:
               - 'server/**'
               - '.github/workflows/ci.yml'
+      - name: Resolve outputs
+        id: result
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "frontend=true" >> $GITHUB_OUTPUT
+            echo "server=true"   >> $GITHUB_OUTPUT
+          else
+            echo "frontend=${{ steps.filter.outputs.frontend }}" >> $GITHUB_OUTPUT
+            echo "server=${{ steps.filter.outputs.server }}"     >> $GITHUB_OUTPUT
+          fi
 
 # ---------------------------------------------------------------------------
 # FRONTEND PIPELINE
