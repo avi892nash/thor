@@ -63,14 +63,6 @@ DATA_DIR=/etc/thor-server/data
 
 After editing: `sudo systemctl restart thor-server`
 
-### Cloudflare Tunnel
-
-```bash
-sudo /opt/thor/repo/server/deploy/setup-cloudflare-tunnel.sh
-```
-
-Exposes port `3001` at your chosen subdomain (e.g. `thor-api.devshram.in`) without port forwarding.
-
 ### Useful commands
 
 ```bash

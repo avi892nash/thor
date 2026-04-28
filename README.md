@@ -1,6 +1,6 @@
 # Thor
 
-Smart home server for controlling Philips WiZ lights over your local network, with a React frontend and a Cloudflare Tunnel for remote access.
+Smart home server for controlling Philips WiZ lights over your local network, with a React frontend and remote access via Cloudflare Tunnel.
 
 ## Server Install (DietPi / Raspberry Pi)
 
@@ -32,16 +32,6 @@ Your API key is printed at the end of the install — save it for the frontend c
 ### Auto-update
 
 The server checks GitHub Releases every 5 minutes and installs a new `.deb` automatically when a new version is available. No action needed.
-
-### Cloudflare Tunnel (remote access)
-
-To expose the server over the internet without port forwarding, run the tunnel setup script after installing:
-
-```bash
-sudo /opt/thor/repo/server/deploy/setup-cloudflare-tunnel.sh
-```
-
-You'll be prompted for your Cloudflare API token, tunnel name, and public subdomain.
 
 ### Useful commands
 
