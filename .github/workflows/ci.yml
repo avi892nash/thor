@@ -19,15 +19,40 @@ env:
   API_URL: 'https://thor-api.devshram.in'
   API_KEY: ''
 
-# ---------------------------------------------------------------------------
-# FRONTEND PIPELINE
-# ---------------------------------------------------------------------------
+# Pipeline shape:
+#
+#   version ──► build-frontend ──┐
+#            └► build-server  ───┴──► release
+#
+# release runs only when BOTH builds succeed. Any failure crashes the pipeline.
+
 jobs:
-  frontend-build:
-    name: '[Frontend] Build'
+  # ---------------------------------------------------------------------------
+  # Compute a shared commit-based version: {semver}+{short-sha}
+  # e.g. 1.0.1+daabfb5
+  # ---------------------------------------------------------------------------
+  version:
+    name: 'Version'
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.VERSION }}
+      base: ${{ steps.v.outputs.BASE }}
+      full: ${{ steps.v.outputs.FULL }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          BASE=$(node -p "require('./server/package.json').version")
+          SHA=$(git rev-parse --short HEAD)
+          echo "BASE=${BASE}"        >> $GITHUB_OUTPUT
+          echo "FULL=${BASE}+${SHA}" >> $GITHUB_OUTPUT
+
+  # ---------------------------------------------------------------------------
+  # Build frontend
+  # ---------------------------------------------------------------------------
+  build-frontend:
+    name: '[Frontend] Build'
+    runs-on: ubuntu-latest
+    needs: version
     defaults:
       run:
         working-directory: frontend
@@ -39,10 +64,6 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
-
-      - name: Extract version
-        id: version
-        run: echo "VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
         run: npm ci
@@ -59,7 +80,7 @@ jobs:
         env:
           REACT_APP_API_URL: ${{ env.API_URL }}
           REACT_APP_API_KEY: ${{ env.API_KEY }}
-          REACT_APP_VERSION: ${{ steps.version.outputs.VERSION }}
+          REACT_APP_VERSION: ${{ needs.version.outputs.full }}
           CI: false
         run: npm run build
 
@@ -69,95 +90,146 @@ jobs:
           path: frontend/build
           retention-days: 1
 
-  frontend-validate:
-    name: '[Frontend] Validate'
+  # ---------------------------------------------------------------------------
+  # Build server .deb
+  # ---------------------------------------------------------------------------
+  build-server:
+    name: '[Server] Build .deb'
     runs-on: ubuntu-latest
-    needs: frontend-build
+    needs: version
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Build TypeScript
+        working-directory: server
+        run: npm run build
+
+      - name: Embed commit SHA
+        run: echo "${{ github.sha }}" > server/dist/.version
+
+      - name: Stage & build .deb
+        run: |
+          FULL="${{ needs.version.outputs.full }}"
+          STAGING=$(mktemp -d)
+
+          cp -r server/package/DEBIAN "$STAGING/DEBIAN"
+          chmod 755 "$STAGING/DEBIAN/postinst" "$STAGING/DEBIAN/prerm"
+          sed -i "s/__VERSION__/$FULL/" "$STAGING/DEBIAN/control"
+
+          mkdir -p "$STAGING/usr/lib/thor-server"
+          cp -r server/dist              "$STAGING/usr/lib/thor-server/dist"
+          cp    server/package.json      "$STAGING/usr/lib/thor-server/package.json"
+          cp    server/package-lock.json "$STAGING/usr/lib/thor-server/package-lock.json"
+
+          mkdir -p "$STAGING/usr/bin"
+          cp server/package/usr/bin/thor-server-update "$STAGING/usr/bin/thor-server-update"
+          chmod 755 "$STAGING/usr/bin/thor-server-update"
+
+          mkdir -p "$STAGING/usr/share/thor-server"
+          cp server/package/usr/share/thor-server/rooms.json.default \
+             "$STAGING/usr/share/thor-server/rooms.json.default"
+
+          mkdir -p "$STAGING/etc/thor-server"
+
+          mkdir -p "$STAGING/lib/systemd/system"
+          cp server/package/lib/systemd/system/thor-server.service "$STAGING/lib/systemd/system/"
+          cp server/package/lib/systemd/system/thor-update.service  "$STAGING/lib/systemd/system/"
+          cp server/package/lib/systemd/system/thor-update.timer    "$STAGING/lib/systemd/system/"
+
+          dpkg-deb --build "$STAGING" thor-api.deb
+          echo "DEB_SHA256=$(sha256sum thor-api.deb | cut -d' ' -f1)" >> $GITHUB_ENV
+          echo "Built thor-api.deb ($DEB_SHA256)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-deb
+          path: thor-api.deb
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Combined release — runs only when BOTH builds succeed
+  # ---------------------------------------------------------------------------
+  release:
+    name: 'Release v${{ needs.version.outputs.full }}'
+    runs-on: ubuntu-latest
+    needs: [version, build-frontend, build-server]
+    permissions:
+      id-token: write
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: frontend-build
-          path: build
+          path: frontend-build
 
-      - name: Check build output
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-deb
+          path: .
+
+      # ── Validate frontend ────────────────────────────────────────────────
+      - name: Validate frontend build
         run: |
-          [ -f build/index.html ] || { echo "ERROR: index.html missing"; exit 1; }
-          [ -d build/static ]     || { echo "ERROR: static/ missing";    exit 1; }
-          JS_COUNT=$(find build/static/js  -name "*.js"  | wc -l)
-          CSS_COUNT=$(find build/static/css -name "*.css" | wc -l)
-          [ "$JS_COUNT"  -gt 0 ] || { echo "ERROR: no JS files";  exit 1; }
-          [ "$CSS_COUNT" -gt 0 ] || { echo "ERROR: no CSS files"; exit 1; }
-          echo "Build OK — JS: $JS_COUNT  CSS: $CSS_COUNT"
+          [ -f frontend-build/index.html ] || { echo "ERROR: index.html missing"; exit 1; }
+          JS=$(find frontend-build/static/js  -name "*.js"  | wc -l)
+          CSS=$(find frontend-build/static/css -name "*.css" | wc -l)
+          [ "$JS"  -gt 0 ] || { echo "ERROR: no JS files";  exit 1; }
+          [ "$CSS" -gt 0 ] || { echo "ERROR: no CSS files"; exit 1; }
+          echo "Frontend OK — JS: $JS  CSS: $CSS"
 
-      - name: Scan for leaked secrets
-        run: |
-          if grep -rEi "password|secret|private_key|AWS_SECRET" build/ \
-               --include="*.js" --include="*.html"; then
-            echo "WARNING: potential sensitive data in build"
-          else
-            echo "No sensitive patterns found"
-          fi
-
-  frontend-health-check:
-    name: '[Frontend] API Health'
-    runs-on: ubuntu-latest
-    needs: frontend-build
-    steps:
-      - name: Check API reachability
+      # ── Check API health (soft — warns but doesn't block release) ────────
+      - name: Check API health
         run: |
           for i in 1 2 3; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               "${{ env.API_URL }}/health" --connect-timeout 10 || echo "000")
-            [ "$STATUS" = "200" ] && { echo "API healthy (HTTP $STATUS)"; exit 0; }
+            [ "$STATUS" = "200" ] && { echo "API healthy (HTTP $STATUS)"; break; }
             echo "Attempt $i: HTTP $STATUS"
             sleep 5
           done
-          echo "WARNING: API unreachable — deployment continues"
+          echo "Continuing with release"
 
-  frontend-deploy:
-    name: '[Frontend] Deploy to S3'
-    runs-on: ubuntu-latest
-    needs: [frontend-build, frontend-validate, frontend-health-check]
-    if: >-
-      needs.frontend-build.result == 'success' &&
-      needs.frontend-validate.result == 'success'
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: frontend-build
-          path: build
-
+      # ── AWS credentials ──────────────────────────────────────────────────
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy versioned build
+      # ── Deploy frontend to S3 ────────────────────────────────────────────
+      - name: Deploy frontend to S3
         run: |
-          VERSION="${{ needs.frontend-build.outputs.version }}"
-          DEST="s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/v${VERSION}"
-          echo "Deploying v${VERSION} → $DEST"
+          BASE="${{ needs.version.outputs.base }}"
+          DEST="s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/v${BASE}"
+          echo "Deploying v${BASE} → $DEST"
 
-          aws s3 sync build/ "$DEST" \
+          aws s3 sync frontend-build/ "$DEST" \
             --delete \
             --cache-control "max-age=31536000,public" \
             --exclude "index.html" \
             --exclude "*.json"
 
-          aws s3 cp build/index.html "$DEST/index.html" \
+          aws s3 cp frontend-build/index.html "$DEST/index.html" \
             --cache-control "no-cache,no-store,must-revalidate"
 
-          find build -name "*.json" | while read f; do
-            aws s3 cp "$f" "$DEST/${f#build/}" \
+          find frontend-build -name "*.json" | while read f; do
+            aws s3 cp "$f" "$DEST/${f#frontend-build/}" \
               --cache-control "no-cache,no-store,must-revalidate"
           done
 
+      # ── Upload loader ────────────────────────────────────────────────────
       - name: Upload loader index.html
         run: |
-          VERSION="${{ needs.frontend-build.outputs.version }}"
+          FULL="${{ needs.version.outputs.full }}"
           cat > /tmp/index.html << LOADER
           <!DOCTYPE html>
           <html lang="en">
@@ -193,7 +265,7 @@ jobs:
                   <button onclick="load()">Retry</button>
                 </div>
               </div>
-              <p class="version">loader v${VERSION}</p>
+              <p class="version">v${FULL}</p>
             </div>
             <script>
               const API='${{ env.API_URL }}';
@@ -220,98 +292,37 @@ jobs:
             --cache-control "no-cache,no-store,must-revalidate" \
             --content-type "text/html"
 
+      # ── Invalidate CloudFront ────────────────────────────────────────────
       - name: Invalidate CloudFront
         run: |
           aws cloudfront create-invalidation \
             --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} \
             --paths "/${{ env.S3_PREFIX }}/*"
 
-      - name: Summary
-        run: |
-          VERSION="${{ needs.frontend-build.outputs.version }}"
-          echo "Frontend v${VERSION} deployed"
-          echo "  Loader: s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/index.html"
-          echo "  App:    s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/v${VERSION}/"
-
-# ---------------------------------------------------------------------------
-# SERVER PIPELINE
-# ---------------------------------------------------------------------------
-
-  server-build-release:
-    name: '[Server] Build .deb & Release'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: server/package-lock.json
-
-      - name: Install dependencies
-        working-directory: server
-        run: npm ci
-
-      - name: Build TypeScript
-        working-directory: server
-        run: npm run build
-
-      - name: Embed commit SHA
-        run: echo "${{ github.sha }}" > server/dist/.version
-
-      - name: Stage package contents
-        run: |
-          VERSION=$(node -p "require('./server/package.json').version")
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-
-          STAGING=$(mktemp -d)
-          echo "STAGING=$STAGING" >> $GITHUB_ENV
-
-          cp -r server/package/DEBIAN "$STAGING/DEBIAN"
-          chmod 755 "$STAGING/DEBIAN/postinst" "$STAGING/DEBIAN/prerm"
-          sed -i "s/__VERSION__/$VERSION/" "$STAGING/DEBIAN/control"
-
-          mkdir -p "$STAGING/usr/lib/thor-server"
-          cp -r server/dist              "$STAGING/usr/lib/thor-server/dist"
-          cp    server/package.json      "$STAGING/usr/lib/thor-server/package.json"
-          cp    server/package-lock.json "$STAGING/usr/lib/thor-server/package-lock.json"
-
-          mkdir -p "$STAGING/usr/bin"
-          cp server/package/usr/bin/thor-server-update "$STAGING/usr/bin/thor-server-update"
-          chmod 755 "$STAGING/usr/bin/thor-server-update"
-
-          mkdir -p "$STAGING/usr/share/thor-server"
-          cp server/package/usr/share/thor-server/rooms.json.default \
-             "$STAGING/usr/share/thor-server/rooms.json.default"
-
-          mkdir -p "$STAGING/etc/thor-server"
-
-          mkdir -p "$STAGING/lib/systemd/system"
-          cp server/package/lib/systemd/system/thor-server.service "$STAGING/lib/systemd/system/"
-          cp server/package/lib/systemd/system/thor-update.service  "$STAGING/lib/systemd/system/"
-          cp server/package/lib/systemd/system/thor-update.timer    "$STAGING/lib/systemd/system/"
-
-      - name: Build .deb
-        run: |
-          DEB_NAME="thor-api.deb"
-          dpkg-deb --build "${{ env.STAGING }}" "$DEB_NAME"
-          echo "DEB_NAME=$DEB_NAME" >> $GITHUB_ENV
-
-          DEB_SHA256=$(sha256sum "$DEB_NAME" | cut -d' ' -f1)
-          echo "DEB_SHA256=$DEB_SHA256" >> $GITHUB_ENV
-          echo "Built: $DEB_NAME ($DEB_SHA256)"
-
-      - name: Publish rolling release
+      # ── Publish combined GitHub Release ──────────────────────────────────
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete server-latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create server-latest \
-            --title "Server v${{ env.VERSION }}" \
-            --notes "sha:${{ github.sha }} deb_sha256:${{ env.DEB_SHA256 }}" \
-            --latest=false \
-            "${{ env.DEB_NAME }}"
-          echo "Released server-latest (v${{ env.VERSION }}, sha: ${{ github.sha }})"
+          FULL="${{ needs.version.outputs.full }}"
+          DEB_SHA256=$(sha256sum thor-api.deb | cut -d' ' -f1)
+
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest \
+            --title "Thor v${FULL}" \
+            --notes "sha:${{ github.sha }} deb_sha256:${DEB_SHA256}" \
+            --latest \
+            thor-api.deb
+
+      # ── Summary ──────────────────────────────────────────────────────────
+      - name: Summary
+        run: |
+          BASE="${{ needs.version.outputs.base }}"
+          FULL="${{ needs.version.outputs.full }}"
+          echo "======================================="
+          echo "  Released Thor v${FULL}"
+          echo "======================================="
+          echo "  Frontend: s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/v${BASE}/"
+          echo "  Server:   thor-api.deb @ github release 'latest'"
+          echo "  Commit:   ${{ github.sha }}"
+          echo "======================================="

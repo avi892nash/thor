@@ -6,7 +6,7 @@
 set -e
 
 REPO="avi892nash/thor"
-RELEASE_TAG="server-latest"
+RELEASE_TAG="latest"
 VERSION_FILE="/usr/lib/thor-server/dist/.version"
 LOG_TAG="thor-update"
 
