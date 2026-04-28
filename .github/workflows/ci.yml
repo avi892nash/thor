@@ -20,47 +20,12 @@ env:
   API_KEY: ''
 
 # ---------------------------------------------------------------------------
-# Detect which parts of the repo changed so jobs only run when relevant
-# ---------------------------------------------------------------------------
-jobs:
-  changes:
-    name: Detect changes
-    runs-on: ubuntu-latest
-    outputs:
-      frontend: ${{ steps.result.outputs.frontend }}
-      server: ${{ steps.result.outputs.server }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            frontend:
-              - 'frontend/**'
-              - '.github/workflows/ci.yml'
-            server:
-              - 'server/**'
-              - '.github/workflows/ci.yml'
-      - name: Resolve outputs
-        id: result
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "frontend=true" >> $GITHUB_OUTPUT
-            echo "server=true"   >> $GITHUB_OUTPUT
-          else
-            echo "frontend=${{ steps.filter.outputs.frontend }}" >> $GITHUB_OUTPUT
-            echo "server=${{ steps.filter.outputs.server }}"     >> $GITHUB_OUTPUT
-          fi
-
-# ---------------------------------------------------------------------------
 # FRONTEND PIPELINE
 # ---------------------------------------------------------------------------
-
+jobs:
   frontend-build:
     name: '[Frontend] Build'
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
     outputs:
       version: ${{ steps.version.outputs.VERSION }}
     defaults:
@@ -107,8 +72,7 @@ jobs:
   frontend-validate:
     name: '[Frontend] Validate'
     runs-on: ubuntu-latest
-    needs: [changes, frontend-build]
-    if: needs.changes.outputs.frontend == 'true'
+    needs: frontend-build
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -137,8 +101,7 @@ jobs:
   frontend-health-check:
     name: '[Frontend] API Health'
     runs-on: ubuntu-latest
-    needs: [changes, frontend-build]
-    if: needs.changes.outputs.frontend == 'true'
+    needs: frontend-build
     steps:
       - name: Check API reachability
         run: |
@@ -154,9 +117,8 @@ jobs:
   frontend-deploy:
     name: '[Frontend] Deploy to S3'
     runs-on: ubuntu-latest
-    needs: [changes, frontend-build, frontend-validate, frontend-health-check]
+    needs: [frontend-build, frontend-validate, frontend-health-check]
     if: >-
-      needs.changes.outputs.frontend == 'true' &&
       needs.frontend-build.result == 'success' &&
       needs.frontend-validate.result == 'success'
     environment: production
@@ -279,8 +241,6 @@ jobs:
   server-build-release:
     name: '[Server] Build .deb & Release'
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.server == 'true'
     permissions:
       contents: write
     steps:
