@@ -145,7 +145,10 @@ jobs:
     name: '[Frontend] Deploy to S3'
     runs-on: ubuntu-latest
     needs: [changes, frontend-build, frontend-validate, frontend-health-check]
-    if: needs.changes.outputs.frontend == 'true'
+    if: >-
+      needs.changes.outputs.frontend == 'true' &&
+      needs.frontend-build.result == 'success' &&
+      needs.frontend-validate.result == 'success'
     environment: production
     permissions:
       id-token: write
