@@ -296,7 +296,7 @@ jobs:
 
       - name: Build .deb
         run: |
-          DEB_NAME="thor-server_${{ env.VERSION }}_all.deb"
+          DEB_NAME="thor-api.deb"
           dpkg-deb --build "${{ env.STAGING }}" "$DEB_NAME"
           echo "DEB_NAME=$DEB_NAME" >> $GITHUB_ENV
 

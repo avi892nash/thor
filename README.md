@@ -12,11 +12,8 @@ Smart home server for controlling Philips WiZ lights over your local network, wi
 ### Install
 
 ```bash
-# Download the latest .deb from GitHub Releases
-curl -fsSL https://github.com/avi892nash/thor/releases/download/server-latest/thor-server_1.0.0_all.deb \
+curl -fsSL https://github.com/avi892nash/thor/releases/download/server-latest/thor-api.deb \
   -o /tmp/thor.deb
-
-# Install (apt handles dependencies)
 sudo apt install /tmp/thor.deb
 ```
 
@@ -45,7 +42,7 @@ sudo thor-server-update                 # force update check now
 ### Manual update
 
 ```bash
-curl -fsSL https://github.com/avi892nash/thor/releases/download/server-latest/thor-server_1.0.0_all.deb \
+curl -fsSL https://github.com/avi892nash/thor/releases/download/server-latest/thor-api.deb \
   -o /tmp/thor.deb && sudo apt install /tmp/thor.deb
 ```
 

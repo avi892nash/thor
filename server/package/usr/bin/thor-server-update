@@ -62,17 +62,17 @@ fi
 
 log "Update available: $LOCAL_SHA → $REMOTE_SHA"
 
-# Get download URL for the _all.deb asset
+# Get download URL for thor-api.deb asset
 DOWNLOAD_URL=$(python3 -c "
 import json, sys
 d = json.loads(sys.stdin.read())
 for a in d.get('assets', []):
-    if a['name'].endswith('_all.deb'):
+    if a['name'] == 'thor-api.deb':
         print(a['browser_download_url'])
         break
 " <<< "$RELEASE_JSON")
 
-[ -n "$DOWNLOAD_URL" ] || fail "No _all.deb asset found in release"
+[ -n "$DOWNLOAD_URL" ] || fail "No thor-api.deb asset found in release"
 
 # Download to temp file (cleaned up on exit)
 TMPFILE=$(mktemp /tmp/thor-server-XXXXXX.deb)
