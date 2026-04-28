@@ -121,7 +121,6 @@ jobs:
     if: >-
       needs.frontend-build.result == 'success' &&
       needs.frontend-validate.result == 'success'
-    environment: production
     permissions:
       id-token: write
       contents: read
