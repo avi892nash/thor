@@ -12,7 +12,7 @@ Smart home server for controlling Philips WiZ lights over your local network, wi
 ### Install
 
 ```bash
-curl -fsSL https://github.com/avi892nash/thor/releases/download/server-latest/thor-api.deb \
+curl -fsSL https://github.com/avi892nash/thor/releases/latest/download/thor-api.deb \
   -o /tmp/thor.deb
 sudo apt install /tmp/thor.deb
 ```
@@ -42,7 +42,7 @@ sudo thor-server-update                 # force update check now
 ### Manual update
 
 ```bash
-curl -fsSL https://github.com/avi892nash/thor/releases/download/server-latest/thor-api.deb \
+curl -fsSL https://github.com/avi892nash/thor/releases/latest/download/thor-api.deb \
   -o /tmp/thor.deb && sudo apt install /tmp/thor.deb
 ```
 
@@ -53,4 +53,3 @@ curl -fsSL https://github.com/avi892nash/thor/releases/download/server-latest/th
 Push to `main` deploys automatically when `frontend/` files change.
 
 The frontend is versioned — each release uploads to `s3://devshram.com/projects/thor/v{version}/` and a loader `index.html` at `projects/thor/index.html` fetches the correct version URL from the backend.
-# Version bump test
