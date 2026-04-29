@@ -33,8 +33,22 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Compute a shared commit-based version: {semver}+{short-sha}
-  # e.g. 1.0.1+daabfb5
+  # Lint PR commit messages against conventional-commits
+  # (config: commitlint.config.cjs)
+  # ---------------------------------------------------------------------------
+  commitlint:
+    name: 'Commitlint'
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: wagoid/commitlint-github-action@v6
+
+  # ---------------------------------------------------------------------------
+  # Compute next semver via semantic-release dry-run (config: release.config.cjs)
+  # Output: {semver}+{short-sha}, e.g. 1.1.0+daabfb5
   # ---------------------------------------------------------------------------
   version:
     name: 'Version'
@@ -172,6 +186,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
@@ -305,20 +321,22 @@ jobs:
             --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} \
             --paths "/${{ env.S3_PREFIX }}/*"
 
-      # ── Publish combined GitHub Release ──────────────────────────────────
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          FULL="${{ needs.version.outputs.full }}"
-          DEB_SHA256=$(sha256sum thor-api.deb | cut -d' ' -f1)
+      # ── Publish via semantic-release ─────────────────────────────────────
+      # Bumps server/package.json, commits [skip ci], tags v*, creates GH
+      # release with notes + thor-api.deb attached. Config: release.config.cjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
 
-          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create latest \
-            --title "Thor v${FULL}" \
-            --notes "sha:${{ github.sha }} deb_sha256:${DEB_SHA256}" \
-            --latest \
-            thor-api.deb
+      - name: Install release tooling
+        run: npm ci --no-audit --no-fund
+
+      - name: Publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release
 
       # ── Summary ──────────────────────────────────────────────────────────
       - name: Summary
