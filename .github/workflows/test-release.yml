@@ -1,12 +1,12 @@
-name: Test Release
+name: Test Published Release
 
 on:
   release:
     types: [published]
 
 jobs:
-  test-deb:
-    name: 'Install & smoke-test .deb'
+  test-published-deb:
+    name: 'Install & smoke-test published .deb'
     runs-on: ubuntu-latest
     steps:
       - name: Download thor-api.deb from release
@@ -18,23 +18,21 @@ jobs:
             --pattern "thor-api.deb" \
             --output thor-api.deb
 
-      - name: Install Node.js 20
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install .deb
-        run: |
-          sudo apt-get install -y ./thor-api.deb 2>&1
-          echo "Exit code: $?"
+        run: sudo apt-get install -y ./thor-api.deb
 
-      - name: Check package is registered
+      - name: Verify package registered
         run: dpkg -s thor-server | grep -E "^(Status|Version):"
 
-      - name: Check server binary exists and runs
+      - name: Smoke-test server
         run: |
           [ -f /usr/lib/thor-server/dist/server.cjs ] || { echo "FAIL: server.cjs missing"; exit 1; }
-          DATA_DIR=/tmp THOR_API_KEY=test PORT=19877 node /usr/lib/thor-server/dist/server.cjs &
+          DATA_DIR=/tmp THOR_API_KEY=test PORT=19877 \
+            node /usr/lib/thor-server/dist/server.cjs &
           PID=$!
           sleep 2
           HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:19877/health || echo "000")
@@ -42,7 +40,7 @@ jobs:
           [ "$HTTP" = "200" ] || { echo "FAIL: /health returned $HTTP"; exit 1; }
           echo "PASS: /health returned 200"
 
-      - name: Check systemd unit files are present
+      - name: Verify systemd units
         run: |
           for f in /lib/systemd/system/thor-server.service \
                    /lib/systemd/system/thor-update.service \
