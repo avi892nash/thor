@@ -53,3 +53,4 @@ curl -fsSL https://github.com/avi892nash/thor/releases/download/server-latest/th
 Push to `main` deploys automatically when `frontend/` files change.
 
 The frontend is versioned — each release uploads to `s3://devshram.com/projects/thor/v{version}/` and a loader `index.html` at `projects/thor/index.html` fetches the correct version URL from the backend.
+# Version bump test
