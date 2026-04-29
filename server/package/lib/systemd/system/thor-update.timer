@@ -1,6 +1,6 @@
 [Unit]
 Description=Thor Server - Auto-update poll timer
-Requires=thor-update.service
+Wants=thor-update.service
 
 [Timer]
 OnBootSec=2min
