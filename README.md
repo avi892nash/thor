@@ -19,12 +19,14 @@ sudo apt install /tmp/thor.deb
 
 The installer will:
 - Create a `thor` system user
-- Generate a random API key and save it to `/etc/thor-server/.env`
-- Seed an empty `rooms.json` at `/etc/thor-server/data/rooms.json`
+- Generate a random `JWT_SECRET` and save it to `/etc/thor-server/.env`
+- Seed an empty `rooms.json` and `users.json` under `/etc/thor-server/data/`
 - Start the `thor-server` systemd service on port `3001`
 - Enable the auto-update timer
 
-Your API key is printed at the end of the install — save it for the frontend config.
+### First launch
+
+Open the frontend and create your admin account. Once at least one account exists, registration is locked — only signed-in users can create more accounts (any user can; there are no roles). All users share the same `rooms.json` (one server = one home).
 
 ### Auto-update
 
@@ -35,7 +37,6 @@ The server checks GitHub Releases every 5 minutes and installs a new `.deb` auto
 ```bash
 systemctl status thor-server            # service status
 journalctl -u thor-server -f            # live server logs
-cat /etc/thor-server/.env               # view config / API key
 sudo thor-server-update                 # force update check now
 ```
 

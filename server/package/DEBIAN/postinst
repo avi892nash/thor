@@ -38,11 +38,10 @@ chmod -R 755 /usr/lib/thor-server
 
 # Generate .env on first install only (conffiles preserves it on upgrade)
 if [ ! -f /etc/thor-server/.env ]; then
-  API_KEY=$(openssl rand -hex 32)
   cat > /etc/thor-server/.env << EOF
 NODE_ENV=production
 PORT=3001
-THOR_API_KEY=${API_KEY}
+JWT_SECRET=$(openssl rand -hex 32)
 ALLOWED_ORIGINS=https://thor.devshram.in
 FRONTEND_BASE_URL=https://devshram.com/projects/thor
 DATA_DIR=/etc/thor-server/data
@@ -52,11 +51,23 @@ EOF
   chown thor:thor /etc/thor-server/.env
   echo ""
   echo "================================================"
-  echo "  Thor installed!  API Key (save this):"
-  echo "  ${API_KEY}"
-  echo "  Stored at: /etc/thor-server/.env"
+  echo "  Thor installed!"
+  echo "  Open the frontend and create your admin"
+  echo "  account on first launch."
   echo "================================================"
   echo ""
+fi
+
+# Upgrade path: ensure JWT_SECRET exists in pre-existing .env files
+if [ -f /etc/thor-server/.env ] && ! grep -q '^JWT_SECRET=' /etc/thor-server/.env; then
+  echo "JWT_SECRET=$(openssl rand -hex 32)" >> /etc/thor-server/.env
+fi
+
+# Seed empty users.json on first install
+if [ ! -f /etc/thor-server/data/users.json ]; then
+  echo '{"users":[]}' > /etc/thor-server/data/users.json
+  chown thor:thor /etc/thor-server/data/users.json
+  chmod 640 /etc/thor-server/data/users.json
 fi
 
 # Enable and start services. Failures here must not abort the install — the
