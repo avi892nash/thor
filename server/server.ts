@@ -8,6 +8,14 @@ import { dirname, join } from 'path';
 import { WizLightManager } from './lib/wizLightManager.js';
 import { RoomsData, NetworkInterface } from './shared/types.js';
 import { logger } from './lib/logger.js';
+import {
+  initAuth,
+  isBootstrapped,
+  createUser,
+  verifyPassword,
+  signToken,
+} from './lib/auth.js';
+import { requireAuth } from './lib/authMiddleware.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,84 +46,19 @@ interface DiscoveryRequest {
 const app = express();
 const server = http.createServer(app);
 
-// Security configuration
-const API_KEY = process.env['THOR_API_KEY'] || '';
-const API_KEY_HEADER = 'x-api-key';
 const ALLOWED_ORIGINS = (process.env['ALLOWED_ORIGINS'] || 'http://localhost:3000').split(',');
 
-// Check if API key security is enabled
-const isSecurityEnabled = (): boolean => {
-  return API_KEY.length > 0;
-};
-
-// Middleware
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, etc.) in development
-    if (!origin && !isSecurityEnabled()) {
-      return callback(null, true);
-    }
-
-    // Check if origin is allowed
     if (!origin || ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.includes('*')) {
       return callback(null, true);
     }
-
     callback(new Error('Not allowed by CORS'));
   },
-  credentials: true
+  credentials: true,
 }));
 
 app.use(express.json());
-
-// API Key authentication middleware
-const authenticateApiKey = (req: Request, res: Response, next: NextFunction): void => {
-  // Skip authentication if API key is not configured (development mode)
-  if (!isSecurityEnabled()) {
-    return next();
-  }
-
-  // Skip authentication for health check
-  if (req.path === '/health') {
-    return next();
-  }
-
-  const providedKey = req.headers[API_KEY_HEADER] as string;
-
-  if (!providedKey) {
-    res.status(401).json({
-      success: false,
-      error: 'API key required',
-      message: 'Please provide API key in x-api-key header'
-    });
-    return;
-  }
-
-  // Constant-time comparison to prevent timing attacks
-  if (providedKey.length !== API_KEY.length || !timingSafeEqual(providedKey, API_KEY)) {
-    res.status(403).json({
-      success: false,
-      error: 'Invalid API key',
-      message: 'The provided API key is not valid'
-    });
-    return;
-  }
-
-  next();
-};
-
-// Constant-time string comparison
-const timingSafeEqual = (a: string, b: string): boolean => {
-  if (a.length !== b.length) return false;
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
-};
-
-// Apply API key middleware to all /api routes
-app.use('/api', authenticateApiKey);
 
 // Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -220,8 +163,7 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    security: isSecurityEnabled() ? 'enabled' : 'disabled',
-    version: process.env['npm_package_version'] || '1.0.0'
+    version: process.env['npm_package_version'] || '1.0.0',
   });
 });
 
@@ -231,6 +173,64 @@ app.get('/frontend', (_req: Request, res: Response) => {
   const version = process.env['npm_package_version'] || '1.0.0';
   res.json({ url: `${baseUrl}/v${version}/`, version });
 });
+
+// ── Auth routes ────────────────────────────────────────────────────────────
+
+app.get('/auth/status', (_req: Request, res: Response) => {
+  res.json({ bootstrapped: isBootstrapped() });
+});
+
+app.post('/auth/register', async (req: Request, res: Response, next: NextFunction) => {
+  // Open while no users exist (bootstrap); otherwise require a valid token
+  if (isBootstrapped()) {
+    return requireAuth(req, res, () => handleRegister(req, res));
+  }
+  return handleRegister(req, res, next);
+});
+
+const handleRegister = async (req: Request, res: Response, _next?: NextFunction): Promise<void> => {
+  try {
+    const { username, password } = req.body as { username?: string; password?: string };
+    if (!username || !password) {
+      res.status(400).json({ success: false, error: 'username and password are required' });
+      return;
+    }
+    const user = await createUser(username, password);
+    const token = signToken(user);
+    logger.info(`Registered user '${user.username}'`);
+    res.json({ success: true, token, user });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'register failed';
+    res.status(400).json({ success: false, error: message });
+  }
+};
+
+app.post('/auth/login', async (req: Request, res: Response) => {
+  try {
+    const { username, password } = req.body as { username?: string; password?: string };
+    if (!username || !password) {
+      res.status(400).json({ success: false, error: 'username and password are required' });
+      return;
+    }
+    const user = await verifyPassword(username, password);
+    if (!user) {
+      res.status(401).json({ success: false, error: 'invalid credentials' });
+      return;
+    }
+    const token = signToken(user);
+    res.json({ success: true, token, user });
+  } catch (err: unknown) {
+    logger.error('Login error', err);
+    res.status(500).json({ success: false, error: 'internal error' });
+  }
+});
+
+app.get('/auth/me', requireAuth, (req: Request, res: Response) => {
+  res.json({ success: true, user: req.user });
+});
+
+// All /api routes require a valid JWT
+app.use('/api', requireAuth);
 
 // Get network information
 app.get('/api/network', (_req: Request, res: Response) => {
@@ -608,4 +608,5 @@ server.listen(PORT, async () => {
   logger.info(`Thor server started on port ${PORT} — logging to ${logger.logFile}`);
   await loadRoomsData();
   logger.info(`Loaded ${roomsData.rooms.length} rooms from JSON`);
+  await initAuth(dataDir);
 });

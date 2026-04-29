@@ -1,4 +1,5 @@
 import { ApiResponse, Room, Light, NetworkInfo, DeviceProperties } from '../types';
+import { getToken, logout } from './authService';
 
 // Light status response from polling
 export interface LightStatus {
@@ -15,22 +16,23 @@ export interface LightStatus {
   offline?: boolean;
 }
 
-// Base API configuration - set via environment variable or defaults to localhost:3001
 const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:3001';
-const API_KEY = process.env.REACT_APP_API_KEY || '';
 
-// Common headers for all requests
-const getHeaders = (): HeadersInit => {
-  const headers: HeadersInit = {
+const getHeaders = (): Record<string, string> => {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-
-  // Add API key if configured
-  if (API_KEY) {
-    headers['x-api-key'] = API_KEY;
+  const token = getToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
-
   return headers;
+};
+
+const handleAuthError = (status: number): void => {
+  if (status === 401) {
+    logout();
+  }
 };
 
 // Generic API call function
@@ -53,11 +55,7 @@ const apiCall = async <T = any>(
     const result = await response.json();
 
     if (!response.ok) {
-      // Handle authentication errors specifically
-      if (response.status === 401 || response.status === 403) {
-        console.error('Authentication failed:', result.message);
-        throw new Error(result.message || 'Authentication failed');
-      }
+      handleAuthError(response.status);
       throw new Error(result.error || `HTTP error! status: ${response.status}`);
     }
 
@@ -76,8 +74,9 @@ export const roomsApi = {
       headers: getHeaders(),
     });
     if (!response.ok) {
+      handleAuthError(response.status);
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || `Failed to load rooms: ${response.statusText}`);
+      throw new Error(error.error || `Failed to load rooms: ${response.statusText}`);
     }
     return await response.json();
   },
@@ -91,8 +90,9 @@ export const roomsApi = {
     });
 
     if (!response.ok) {
+      handleAuthError(response.status);
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || `Failed to save rooms: ${response.statusText}`);
+      throw new Error(error.error || `Failed to save rooms: ${response.statusText}`);
     }
   }
 };
@@ -113,8 +113,9 @@ export const lightsApi = {
     });
 
     if (!response.ok) {
+      handleAuthError(response.status);
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || errorData.error || `Failed to update light ${ip}`);
+      throw new Error(errorData.error || `Failed to update light ${ip}`);
     }
   },
 
