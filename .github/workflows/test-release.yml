@@ -30,11 +30,12 @@ jobs:
 
       - name: Smoke-test server
         run: |
+          [ -f /usr/lib/thor-server/dist/server.cjs ] || { echo "FAIL: server.cjs missing"; exit 1; }
           DATA_DIR=/tmp THOR_API_KEY=test PORT=19877 \
             node /usr/lib/thor-server/dist/server.cjs &
           PID=$!
           sleep 2
-          HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:19877/health)
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:19877/health || echo "000")
           kill $PID 2>/dev/null || true
           [ "$HTTP" = "200" ] || { echo "FAIL: /health returned $HTTP"; exit 1; }
           echo "PASS: /health returned 200"
