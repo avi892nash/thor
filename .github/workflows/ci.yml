@@ -7,6 +7,11 @@ on:
       - 'frontend/**'
       - 'server/**'
       - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - 'server/**'
+      - '.github/workflows/ci.yml'
   workflow_dispatch:
 
 env:
@@ -161,6 +166,7 @@ jobs:
     name: 'Release v${{ needs.version.outputs.full }}'
     runs-on: ubuntu-latest
     needs: [version, build-frontend, build-server]
+    if: github.event_name != 'pull_request'
     permissions:
       id-token: write
       contents: write
