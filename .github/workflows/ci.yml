@@ -110,7 +110,7 @@ jobs:
         working-directory: server
         run: npm ci
 
-      - name: Build TypeScript
+      - name: Build (typecheck + esbuild bundle)
         working-directory: server
         run: npm run build
 
@@ -127,9 +127,7 @@ jobs:
           sed -i "s/__VERSION__/$FULL/" "$STAGING/DEBIAN/control"
 
           mkdir -p "$STAGING/usr/lib/thor-server"
-          cp -r server/dist              "$STAGING/usr/lib/thor-server/dist"
-          cp    server/package.json      "$STAGING/usr/lib/thor-server/package.json"
-          cp    server/package-lock.json "$STAGING/usr/lib/thor-server/package-lock.json"
+          cp -r server/dist "$STAGING/usr/lib/thor-server/dist"
 
           mkdir -p "$STAGING/usr/bin"
           cp server/package/usr/bin/thor-server-update "$STAGING/usr/bin/thor-server-update"

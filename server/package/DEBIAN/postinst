@@ -32,10 +32,7 @@ mkdir -p /var/log/thor-server
 chown thor:thor /var/log/thor-server
 chmod 750 /var/log/thor-server
 
-# Install production dependencies
-cd /usr/lib/thor-server
-npm ci --omit=dev --quiet
-
+# Server is a single self-contained bundle — nothing to install at runtime.
 chown -R root:thor /usr/lib/thor-server
 chmod -R 755 /usr/lib/thor-server
 
@@ -62,10 +59,11 @@ EOF
   echo ""
 fi
 
-# Enable and start services (skip if systemd is not running, e.g. in chroot/container)
-if systemctl is-system-running --quiet 2>/dev/null || [ "$1" = "configure" ]; then
-  systemctl daemon-reload
-  systemctl enable thor-server thor-update.timer
-  systemctl restart thor-server
-  systemctl start thor-update.timer
+# Enable and start services. Failures here must not abort the install — the
+# package is on disk and a service issue can be debugged with journalctl.
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload                              || true
+  systemctl enable thor-server thor-update.timer       || true
+  systemctl restart thor-server                        || echo "WARN: thor-server failed to start. Check: journalctl -u thor-server"
+  systemctl start thor-update.timer                    || true
 fi
