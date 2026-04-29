@@ -10,5 +10,10 @@
     "build:frontend": "npm run build --prefix frontend",
     "build": "npm run build:server && npm run build:frontend",
     "start": "npm run start --prefix server"
+  },
+  "devDependencies": {
+    "@commitlint/config-conventional": "^19.5.0",
+    "@semantic-release/git": "^10.0.1",
+    "semantic-release": "^24.1.2"
   }
 }

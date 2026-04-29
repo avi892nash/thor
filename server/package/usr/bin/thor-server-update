@@ -6,7 +6,6 @@
 set -e
 
 REPO="avi892nash/thor"
-RELEASE_TAG="latest"
 VERSION_FILE="/usr/lib/thor-server/dist/.version"
 LOG_TAG="thor-update"
 
@@ -20,14 +19,14 @@ if lsof /var/lib/dpkg/lock-frontend &>/dev/null 2>&1; then
 fi
 
 # Fetch release metadata from GitHub API
-API_URL="https://api.github.com/repos/${REPO}/releases/tags/${RELEASE_TAG}"
+API_URL="https://api.github.com/repos/${REPO}/releases/latest"
 
 HTTP_CODE=$(curl -o /dev/null -sw "%{http_code}" \
   -H "Accept: application/vnd.github+json" \
   "$API_URL" 2>/dev/null)
 
 if [ "$HTTP_CODE" = "404" ]; then
-  log "No release found yet (server-latest tag missing), skipping"
+  log "No release found yet, skipping"
   exit 0
 fi
 
