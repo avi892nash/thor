@@ -24,12 +24,18 @@ env:
   API_URL: 'https://thor-api.devshram.in'
   API_KEY: ''
 
-# Pipeline shape:
+# Pipeline shape (PR):
 #
-#   version ──► build-frontend ──┐
-#            └► build-server  ───┴──► release
+#   commitlint
+#   version ──► build-frontend
+#           └─► build-server ──► test-deb
 #
-# release runs only when BOTH builds succeed. Any failure crashes the pipeline.
+# Pipeline shape (push to main, adds release):
+#
+#   version ──► build-frontend ──────────────┐
+#           └─► build-server ──► test-deb ───┴──► release
+#
+# Post-release (test-release.yml): release published ──► test-published-deb
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -174,12 +180,56 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------------------
+  # Install the built .deb and smoke-test the server binary
+  # Runs on every push and PR — catches packaging bugs before release
+  # ---------------------------------------------------------------------------
+  test-deb:
+    name: '[Server] Install & smoke-test .deb'
+    runs-on: ubuntu-latest
+    needs: build-server
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-deb
+          path: .
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install .deb
+        run: sudo apt-get install -y ./thor-api.deb
+
+      - name: Verify package registered
+        run: dpkg -s thor-server | grep -E "^(Status|Version):"
+
+      - name: Smoke-test server
+        run: |
+          DATA_DIR=/tmp THOR_API_KEY=test PORT=19877 \
+            node /usr/lib/thor-server/dist/server.cjs &
+          PID=$!
+          sleep 2
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:19877/health)
+          kill $PID 2>/dev/null || true
+          [ "$HTTP" = "200" ] || { echo "FAIL: /health returned $HTTP"; exit 1; }
+          echo "PASS: /health returned 200"
+
+      - name: Verify systemd units
+        run: |
+          for f in /lib/systemd/system/thor-server.service \
+                   /lib/systemd/system/thor-update.service \
+                   /lib/systemd/system/thor-update.timer; do
+            [ -f "$f" ] || { echo "FAIL: $f missing"; exit 1; }
+          done
+          echo "PASS: all systemd units present"
+
+  # ---------------------------------------------------------------------------
   # Combined release — runs only when BOTH builds succeed
   # ---------------------------------------------------------------------------
   release:
     name: 'Release v${{ needs.version.outputs.full }}'
     runs-on: ubuntu-latest
-    needs: [version, build-frontend, build-server]
+    needs: [version, build-frontend, test-deb]
     if: github.event_name != 'pull_request'
     permissions:
       id-token: write
