@@ -1,16 +1,18 @@
 #!/bin/bash
 # Thor Server - Auto-updater
-# Checks GitHub Releases for a new build; downloads and installs if SHA differs.
-# Runs as root via systemd oneshot service.
+# Compares the locally-installed release tag against /releases/latest on GitHub
+# and applies the new .deb if they differ. Runs as root via systemd oneshot.
 
 set -e
 
 REPO="avi892nash/thor"
-VERSION_FILE="/usr/lib/thor-server/dist/.version"
-LOG_TAG="thor-update"
+INSTALLED_TAG_FILE="/var/lib/thor-server/installed-tag"
 
-log()  { logger -t "$LOG_TAG" "$1"; }
-fail() { logger -t "$LOG_TAG" "ERROR: $1"; exit 1; }
+# Print to stdout; systemd's SyslogIdentifier=thor-update routes it to journald
+# under the same tag the timer-driven runs use, so `journalctl -t thor-update`
+# still works. Errors go to stderr.
+log()  { printf '[thor-update] %s\n' "$*"; }
+fail() { printf '[thor-update] ERROR: %s\n' "$*" >&2; exit 1; }
 
 # Check dpkg lock — if another apt/dpkg process is running, skip and retry next poll
 if lsof /var/lib/dpkg/lock-frontend &>/dev/null 2>&1; then
@@ -51,44 +53,36 @@ json_get() {
   "
 }
 
-# Extract commit SHA from release body (format: "sha:<40-char-hex>")
-REMOTE_SHA=$(echo "$RELEASE_JSON" | json_get "(d.body||'').split(/\\s+/).find(t=>t.startsWith('sha:'))?.slice(4)")
+# Extract tag and asset URL from /releases/latest
+TAG=$(echo "$RELEASE_JSON" | json_get "d.tag_name")
+DOWNLOAD_URL=$(echo "$RELEASE_JSON" | json_get "(d.assets||[]).find(a=>a.name==='thor-api.deb')?.browser_download_url")
 
-[ -n "$REMOTE_SHA" ] || { log "Could not parse SHA from release body, skipping"; exit 0; }
+[ -n "$TAG" ] || fail "release has no tag_name"
+[ -n "$DOWNLOAD_URL" ] || fail "no thor-api.deb asset on release $TAG"
 
-# Compare with locally installed version
-LOCAL_SHA=$(tr -d '[:space:]' < "$VERSION_FILE" 2>/dev/null || echo "none")
+# Compare with locally installed tag (written here after the previous update)
+LOCAL_TAG=$(cat "$INSTALLED_TAG_FILE" 2>/dev/null || echo "")
 
-if [ "$LOCAL_SHA" = "$REMOTE_SHA" ]; then
-  log "Up to date ($LOCAL_SHA)"
+if [ "$LOCAL_TAG" = "$TAG" ]; then
+  log "Up to date ($TAG)"
   exit 0
 fi
 
-log "Update available: $LOCAL_SHA → $REMOTE_SHA"
-
-# Get download URL for thor-api.deb asset
-DOWNLOAD_URL=$(echo "$RELEASE_JSON" | json_get "(d.assets||[]).find(a=>a.name==='thor-api.deb')?.browser_download_url")
-
-[ -n "$DOWNLOAD_URL" ] || fail "No thor-api.deb asset found in release"
+log "Update available: ${LOCAL_TAG:-none} → $TAG"
 
 # Download to temp file (cleaned up on exit)
 TMPFILE=$(mktemp /tmp/thor-server-XXXXXX.deb)
 trap 'rm -f "$TMPFILE"' EXIT
 
-log "Downloading from $DOWNLOAD_URL..."
-curl -fsSL "$DOWNLOAD_URL" -o "$TMPFILE" || fail "Download failed"
-
-# Verify SHA256 if embedded in release notes (format: "deb_sha256:<hash>")
-EXPECTED_SHA256=$(echo "$RELEASE_JSON" | json_get "(d.body||'').split(/\\s+/).find(t=>t.startsWith('deb_sha256:'))?.slice(11)")
-
-if [ -n "$EXPECTED_SHA256" ]; then
-  ACTUAL_SHA256=$(sha256sum "$TMPFILE" | cut -d' ' -f1)
-  if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
-    fail "SHA256 mismatch — download may be corrupt, aborting"
-  fi
-  log "SHA256 verified"
-fi
+log "Downloading $DOWNLOAD_URL"
+curl -fsSL "$DOWNLOAD_URL" -o "$TMPFILE" || fail "download failed"
 
 # Install the new package
-log "Installing new package..."
-apt install -y "$TMPFILE" && log "Successfully updated to $REMOTE_SHA"
+log "Installing $TAG..."
+apt install -y "$TMPFILE" || fail "apt install failed (see apt output above)"
+
+# Persist the installed tag for the next run's comparison
+mkdir -p "$(dirname "$INSTALLED_TAG_FILE")"
+echo "$TAG" > "$INSTALLED_TAG_FILE"
+
+log "Successfully updated to $TAG"

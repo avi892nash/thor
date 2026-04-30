@@ -43,10 +43,11 @@ sudo apt install /tmp/thor.deb
 ### Auto-update flow
 
 Every 5 minutes, `thor-update.timer` runs `thor-server-update`:
-1. Fetches the `server-latest` GitHub Release metadata
-2. Compares commit SHA in release notes vs `/usr/lib/thor-server/dist/.version`
-3. If different: downloads the new `.deb`, verifies SHA256, runs `apt install`
-4. The service restarts automatically via `postinst`
+1. Fetches `releases/latest` from the GitHub API
+2. Compares the release `tag_name` against `/var/lib/thor-server/installed-tag`
+3. If different: downloads the `thor-api.deb` asset and runs `apt install`
+4. Records the new tag in `/var/lib/thor-server/installed-tag`
+5. The service restarts automatically via `postinst`
 
 ### Config
 
