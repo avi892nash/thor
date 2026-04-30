@@ -72,6 +72,26 @@ if [ ! -f /etc/thor-server/data/users.json ]; then
   chmod 640 /etc/thor-server/data/users.json
 fi
 
+# Stop any stray thor-server process that's not under systemd (e.g. a manual
+# `npm run dev` or leftover from a previous install). Without this, the new
+# systemd unit can't bind to PORT and would silently fail to start.
+PORT=$(grep -E '^PORT=' /etc/thor-server/.env | cut -d= -f2)
+PORT="${PORT:-3001}"
+if command -v lsof &>/dev/null; then
+  STRAY_PIDS=$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | grep -v "^$$\$" || true)
+  if [ -n "$STRAY_PIDS" ]; then
+    echo "Found process(es) listening on port $PORT — stopping them"
+    # shellcheck disable=SC2086
+    kill $STRAY_PIDS 2>/dev/null || true
+    sleep 1
+    # Force-kill anything still alive
+    # shellcheck disable=SC2086
+    kill -9 $STRAY_PIDS 2>/dev/null || true
+  fi
+elif command -v fuser &>/dev/null; then
+  fuser -k "${PORT}/tcp" 2>/dev/null || true
+fi
+
 # Enable and start services. Failures here must not abort the install — the
 # package is on disk and a service issue can be debugged with journalctl.
 if [ -d /run/systemd/system ]; then
