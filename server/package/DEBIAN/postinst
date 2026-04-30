@@ -42,7 +42,7 @@ if [ ! -f /etc/thor-server/.env ]; then
 NODE_ENV=production
 PORT=3001
 JWT_SECRET=$(openssl rand -hex 32)
-ALLOWED_ORIGINS=https://assets.devshram.com
+ALLOWED_ORIGINS=https://assets.devshram.com,https://thor.devshram.com
 FRONTEND_BASE_URL=https://assets.devshram.com/projects/thor
 DATA_DIR=/etc/thor-server/data
 LOG_DIR=/var/log/thor-server
