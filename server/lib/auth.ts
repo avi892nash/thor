@@ -58,7 +58,12 @@ export const initAuth = async (dataDir: string): Promise<void> => {
   }
 
   users = await migrateAndSeed(loaded);
-  await persist();
+  // Only persist if migration/seeding actually changed the on-disk shape.
+  const before = raw ?? '';
+  const after = JSON.stringify({ users }, null, 2);
+  if (before.trim() !== after.trim()) {
+    await persist();
+  }
   logger.info(`Loaded ${users.length} users from ${usersPath}`);
 };
 
