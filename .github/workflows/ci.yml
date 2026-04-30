@@ -133,9 +133,6 @@ jobs:
         working-directory: server
         run: npm run build
 
-      - name: Embed commit SHA
-        run: echo "${{ github.sha }}" > server/dist/.version
-
       - name: Stage & build .deb
         run: |
           FULL="${{ needs.version.outputs.full }}"
