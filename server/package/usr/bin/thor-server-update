@@ -39,15 +39,20 @@ RELEASE_JSON=$(curl -fsSL \
   -H "Accept: application/vnd.github+json" \
   "$API_URL" 2>/dev/null) || { log "GitHub API unreachable, skipping"; exit 0; }
 
+# Helper: parse JSON via node (always present — package depends on nodejs)
+json_get() {
+  # usage: echo "$JSON" | json_get '<node expression returning a string>'
+  node -e "
+    let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+      const d = JSON.parse(s);
+      const out = ($1);
+      if (out !== undefined && out !== null) process.stdout.write(String(out));
+    });
+  "
+}
+
 # Extract commit SHA from release body (format: "sha:<40-char-hex>")
-REMOTE_SHA=$(python3 -c "
-import json, sys
-d = json.loads(sys.stdin.read())
-for token in d.get('body', '').split():
-    if token.startswith('sha:'):
-        print(token[4:])
-        break
-" <<< "$RELEASE_JSON")
+REMOTE_SHA=$(echo "$RELEASE_JSON" | json_get "(d.body||'').split(/\\s+/).find(t=>t.startsWith('sha:'))?.slice(4)")
 
 [ -n "$REMOTE_SHA" ] || { log "Could not parse SHA from release body, skipping"; exit 0; }
 
@@ -62,14 +67,7 @@ fi
 log "Update available: $LOCAL_SHA → $REMOTE_SHA"
 
 # Get download URL for thor-api.deb asset
-DOWNLOAD_URL=$(python3 -c "
-import json, sys
-d = json.loads(sys.stdin.read())
-for a in d.get('assets', []):
-    if a['name'] == 'thor-api.deb':
-        print(a['browser_download_url'])
-        break
-" <<< "$RELEASE_JSON")
+DOWNLOAD_URL=$(echo "$RELEASE_JSON" | json_get "(d.assets||[]).find(a=>a.name==='thor-api.deb')?.browser_download_url")
 
 [ -n "$DOWNLOAD_URL" ] || fail "No thor-api.deb asset found in release"
 
@@ -81,14 +79,7 @@ log "Downloading from $DOWNLOAD_URL..."
 curl -fsSL "$DOWNLOAD_URL" -o "$TMPFILE" || fail "Download failed"
 
 # Verify SHA256 if embedded in release notes (format: "deb_sha256:<hash>")
-EXPECTED_SHA256=$(python3 -c "
-import json, sys
-d = json.loads(sys.stdin.read())
-for token in d.get('body', '').split():
-    if token.startswith('deb_sha256:'):
-        print(token[11:])
-        break
-" <<< "$RELEASE_JSON")
+EXPECTED_SHA256=$(echo "$RELEASE_JSON" | json_get "(d.body||'').split(/\\s+/).find(t=>t.startsWith('deb_sha256:'))?.slice(11)")
 
 if [ -n "$EXPECTED_SHA256" ]; then
   ACTUAL_SHA256=$(sha256sum "$TMPFILE" | cut -d' ' -f1)
