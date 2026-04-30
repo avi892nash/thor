@@ -139,7 +139,7 @@ jobs:
           STAGING=$(mktemp -d)
 
           cp -r server/package/DEBIAN "$STAGING/DEBIAN"
-          chmod 755 "$STAGING/DEBIAN/postinst" "$STAGING/DEBIAN/prerm"
+          chmod 755 "$STAGING/DEBIAN/postinst" "$STAGING/DEBIAN/prerm" "$STAGING/DEBIAN/postrm"
           sed -i "s/__VERSION__/$FULL/" "$STAGING/DEBIAN/control"
 
           mkdir -p "$STAGING/usr/lib/thor-server"
