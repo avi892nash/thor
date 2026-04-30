@@ -7,10 +7,12 @@ set -e
 
 REPO="avi892nash/thor"
 VERSION_FILE="/usr/lib/thor-server/dist/.version"
-LOG_TAG="thor-update"
 
-log()  { logger -t "$LOG_TAG" "$1"; }
-fail() { logger -t "$LOG_TAG" "ERROR: $1"; exit 1; }
+# Print to stdout; systemd's SyslogIdentifier=thor-update routes it to journald
+# under the same tag the timer-driven runs use, so `journalctl -t thor-update`
+# still works. Errors go to stderr.
+log()  { printf '[thor-update] %s\n' "$*"; }
+fail() { printf '[thor-update] ERROR: %s\n' "$*" >&2; exit 1; }
 
 # Check dpkg lock — if another apt/dpkg process is running, skip and retry next poll
 if lsof /var/lib/dpkg/lock-frontend &>/dev/null 2>&1; then
@@ -91,4 +93,5 @@ fi
 
 # Install the new package
 log "Installing new package..."
-apt install -y "$TMPFILE" && log "Successfully updated to $REMOTE_SHA"
+apt install -y "$TMPFILE" || fail "apt install failed (see apt output above)"
+log "Successfully updated to $REMOTE_SHA"
