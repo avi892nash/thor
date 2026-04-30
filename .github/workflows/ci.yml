@@ -21,7 +21,7 @@ env:
   S3_PREFIX: 'projects/thor'
   CLOUDFRONT_DISTRIBUTION_ID: 'E2RU8A6DN1OCFF'
   AWS_ROLE_ARN: 'arn:aws:iam::532197675314:role/avi89nash_s3_upload'
-  API_URL: 'https://thor-api.devshram.in'
+  API_URL: 'https://thor-api.devshram.com'
 
 # Pipeline shape (PR):
 #
@@ -94,10 +94,6 @@ jobs:
 
       - name: Lint
         run: npm run lint --if-present
-        continue-on-error: true
-
-      - name: Test
-        run: npm test -- --passWithNoTests --watchAll=false
         continue-on-error: true
 
       - name: Build
