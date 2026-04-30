@@ -201,33 +201,78 @@ jobs:
       - name: Verify package registered
         run: dpkg -s thor-server | grep -E "^(Status|Version):"
 
-      - name: Smoke-test server (health + auth round-trip)
+      - name: Smoke-test server (roles + password change + user CRUD)
         run: |
           DATADIR=$(mktemp -d)
-          echo '{"users":[]}' > "$DATADIR/users.json"
           DATA_DIR=$DATADIR JWT_SECRET=ci-test-secret PORT=19877 \
             node /usr/lib/thor-server/dist/server.cjs &
           PID=$!
           sleep 2
           trap 'kill $PID 2>/dev/null || true' EXIT
 
-          HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:19877/health)
-          [ "$HTTP" = "200" ] || { echo "FAIL: /health returned $HTTP"; exit 1; }
+          API=http://localhost:19877
+          fail() { echo "FAIL: $*"; exit 1; }
+          jget() { python3 -c "import sys,json;print(json.load(sys.stdin)$1)"; }
 
-          REG=$(curl -s -X POST http://localhost:19877/auth/register \
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" $API/health)
+          [ "$HTTP" = "200" ] || fail "/health returned $HTTP"
+
+          # 1. Default root login
+          ROOT_TOKEN=$(curl -s -X POST $API/auth/login -H "Content-Type: application/json" \
+            -d '{"username":"root","password":"thor"}' | jget "['token']")
+          [ -n "$ROOT_TOKEN" ] || fail "default root login did not return token"
+
+          # 2. /auth/me reports role + mustChangePassword
+          ME=$(curl -s -H "Authorization: Bearer $ROOT_TOKEN" $API/auth/me)
+          echo "$ME" | grep -q '"role":"root"'             || fail "role missing in /auth/me ($ME)"
+          echo "$ME" | grep -q '"mustChangePassword":true' || fail "mustChangePassword not set ($ME)"
+
+          # 3. Rotate root password
+          curl -fs -X POST $API/auth/password -H "Authorization: Bearer $ROOT_TOKEN" \
             -H "Content-Type: application/json" \
-            -d '{"username":"smoke","password":"smoke-pw"}')
-          TOKEN=$(echo "$REG" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
-          [ -n "$TOKEN" ] || { echo "FAIL: register did not return token: $REG"; exit 1; }
+            -d '{"currentPassword":"thor","newPassword":"rotated-pw-123"}' >/dev/null \
+            || fail "root password change"
+          OLD=$(curl -s -o /dev/null -w "%{http_code}" -X POST $API/auth/login \
+            -H "Content-Type: application/json" -d '{"username":"root","password":"thor"}')
+          [ "$OLD" = "401" ] || fail "old password should have been rejected (got $OLD)"
+          ROOT_TOKEN=$(curl -s -X POST $API/auth/login -H "Content-Type: application/json" \
+            -d '{"username":"root","password":"rotated-pw-123"}' | jget "['token']")
 
+          # 4. Root creates alice
+          curl -fs -X POST $API/auth/users -H "Authorization: Bearer $ROOT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"username":"alice","password":"alice-pass"}' >/dev/null \
+            || fail "create user as root"
+          USER_TOKEN=$(curl -s -X POST $API/auth/login -H "Content-Type: application/json" \
+            -d '{"username":"alice","password":"alice-pass"}' | jget "['token']")
+          curl -s -H "Authorization: Bearer $USER_TOKEN" $API/auth/me \
+            | grep -q '"mustChangePassword":true' || fail "alice mustChangePassword not set"
+
+          # 5. Alice cannot create users
+          ST=$(curl -s -o /dev/null -w "%{http_code}" -X POST $API/auth/users \
+            -H "Authorization: Bearer $USER_TOKEN" -H "Content-Type: application/json" \
+            -d '{"username":"bob","password":"bob-pass"}')
+          [ "$ST" = "403" ] || fail "non-root creating user should be 403 (got $ST)"
+
+          # 6. Alice changes own password
+          curl -fs -X POST $API/auth/password -H "Authorization: Bearer $USER_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"currentPassword":"alice-pass","newPassword":"alice-new-pass"}' >/dev/null \
+            || fail "alice self password change"
+
+          # 7. /api/rooms still gated and works with token
           AUTH_HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $TOKEN" http://localhost:19877/api/rooms)
-          [ "$AUTH_HTTP" = "200" ] || { echo "FAIL: /api/rooms with token returned $AUTH_HTTP"; exit 1; }
+            -H "Authorization: Bearer $USER_TOKEN" $API/api/rooms)
+          [ "$AUTH_HTTP" = "200" ] || fail "/api/rooms with alice token returned $AUTH_HTTP"
+          UNAUTH_HTTP=$(curl -s -o /dev/null -w "%{http_code}" $API/api/rooms)
+          [ "$UNAUTH_HTTP" = "401" ] || fail "/api/rooms without token returned $UNAUTH_HTTP"
 
-          UNAUTH_HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:19877/api/rooms)
-          [ "$UNAUTH_HTTP" = "401" ] || { echo "FAIL: /api/rooms without token returned $UNAUTH_HTTP (expected 401)"; exit 1; }
+          # 8. /auth/register no longer exists
+          REG_HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST $API/auth/register \
+            -H "Content-Type: application/json" -d '{"username":"x","password":"y"}')
+          [ "$REG_HTTP" = "404" ] || fail "/auth/register should be 404 (got $REG_HTTP)"
 
-          echo "PASS: /health 200, register→token, /api/rooms 200 with token, 401 without"
+          echo "PASS: roles, password change, user CRUD, gated /api"
 
       - name: Verify systemd units
         run: |

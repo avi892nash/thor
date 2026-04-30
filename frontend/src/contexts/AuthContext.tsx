@@ -4,7 +4,6 @@ import {
   fetchMe,
   getToken,
   login as svcLogin,
-  register as svcRegister,
   logout as svcLogout,
 } from '../services/authService';
 
@@ -12,8 +11,8 @@ interface AuthContextValue {
   user: PublicUser | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string) => Promise<void>;
   logout: () => void;
+  refreshMe: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -53,18 +52,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(res.user);
   }, []);
 
-  const register = useCallback(async (username: string, password: string) => {
-    const res = await svcRegister(username, password);
-    if (!user) setUser(res.user);
-  }, [user]);
-
   const logout = useCallback(() => {
     svcLogout();
     setUser(null);
   }, []);
 
+  const refreshMe = useCallback(async () => {
+    if (!getToken()) return;
+    try {
+      const me = await fetchMe();
+      setUser(me);
+    } catch {
+      svcLogout();
+      setUser(null);
+    }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshMe }}>
       {children}
     </AuthContext.Provider>
   );

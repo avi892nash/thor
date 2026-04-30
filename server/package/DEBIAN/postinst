@@ -52,8 +52,10 @@ EOF
   echo ""
   echo "================================================"
   echo "  Thor installed!"
-  echo "  Open the frontend and create your admin"
-  echo "  account on first launch."
+  echo "  Sign in to the frontend with:"
+  echo "    username: root"
+  echo "    password: thor"
+  echo "  Change the password immediately."
   echo "================================================"
   echo ""
 fi

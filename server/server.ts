@@ -10,12 +10,16 @@ import { RoomsData, NetworkInterface } from './shared/types.js';
 import { logger } from './lib/logger.js';
 import {
   initAuth,
-  isBootstrapped,
   createUser,
   verifyPassword,
   signToken,
+  getPublicUser,
+  changeOwnPassword,
+  adminResetPassword,
+  deleteUser,
+  listUsers,
 } from './lib/auth.js';
-import { requireAuth } from './lib/authMiddleware.js';
+import { requireAuth, requireRoot } from './lib/authMiddleware.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -176,35 +180,6 @@ app.get('/frontend', (_req: Request, res: Response) => {
 
 // ── Auth routes ────────────────────────────────────────────────────────────
 
-app.get('/auth/status', (_req: Request, res: Response) => {
-  res.json({ bootstrapped: isBootstrapped() });
-});
-
-app.post('/auth/register', async (req: Request, res: Response, next: NextFunction) => {
-  // Open while no users exist (bootstrap); otherwise require a valid token
-  if (isBootstrapped()) {
-    return requireAuth(req, res, () => handleRegister(req, res));
-  }
-  return handleRegister(req, res, next);
-});
-
-const handleRegister = async (req: Request, res: Response, _next?: NextFunction): Promise<void> => {
-  try {
-    const { username, password } = req.body as { username?: string; password?: string };
-    if (!username || !password) {
-      res.status(400).json({ success: false, error: 'username and password are required' });
-      return;
-    }
-    const user = await createUser(username, password);
-    const token = signToken(user);
-    logger.info(`Registered user '${user.username}'`);
-    res.json({ success: true, token, user });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'register failed';
-    res.status(400).json({ success: false, error: message });
-  }
-};
-
 app.post('/auth/login', async (req: Request, res: Response) => {
   try {
     const { username, password } = req.body as { username?: string; password?: string };
@@ -226,7 +201,82 @@ app.post('/auth/login', async (req: Request, res: Response) => {
 });
 
 app.get('/auth/me', requireAuth, (req: Request, res: Response) => {
-  res.json({ success: true, user: req.user });
+  // Re-read from users.json so mustChangePassword reflects latest state
+  const user = getPublicUser(req.user!.username);
+  if (!user) {
+    res.status(401).json({ success: false, error: 'user no longer exists' });
+    return;
+  }
+  res.json({ success: true, user });
+});
+
+app.post('/auth/password', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { currentPassword, newPassword } = req.body as {
+      currentPassword?: string;
+      newPassword?: string;
+    };
+    if (!currentPassword || !newPassword) {
+      res.status(400).json({ success: false, error: 'currentPassword and newPassword are required' });
+      return;
+    }
+    const user = await changeOwnPassword(req.user!.username, currentPassword, newPassword);
+    res.json({ success: true, user });
+  } catch (err: unknown) {
+    res.status(400).json({ success: false, error: err instanceof Error ? err.message : 'failed' });
+  }
+});
+
+// ── Root-only user management ──────────────────────────────────────────────
+
+app.get('/auth/users', requireAuth, requireRoot, (_req: Request, res: Response) => {
+  res.json({ success: true, users: listUsers() });
+});
+
+app.post('/auth/users', requireAuth, requireRoot, async (req: Request, res: Response) => {
+  try {
+    const { username, password } = req.body as { username?: string; password?: string };
+    if (!username || !password) {
+      res.status(400).json({ success: false, error: 'username and password are required' });
+      return;
+    }
+    const user = await createUser(username, password, 'user', true);
+    logger.info(`Root '${req.user!.username}' created user '${user.username}'`);
+    res.json({ success: true, user });
+  } catch (err: unknown) {
+    res.status(400).json({ success: false, error: err instanceof Error ? err.message : 'failed' });
+  }
+});
+
+app.delete('/auth/users/:username', requireAuth, requireRoot, async (req: Request, res: Response) => {
+  try {
+    const target = req.params['username'];
+    if (!target) {
+      res.status(400).json({ success: false, error: 'username is required' });
+      return;
+    }
+    await deleteUser(target);
+    logger.info(`Root '${req.user!.username}' deleted user '${target}'`);
+    res.json({ success: true });
+  } catch (err: unknown) {
+    res.status(400).json({ success: false, error: err instanceof Error ? err.message : 'failed' });
+  }
+});
+
+app.post('/auth/users/:username/password', requireAuth, requireRoot, async (req: Request, res: Response) => {
+  try {
+    const target = req.params['username'];
+    const { newPassword } = req.body as { newPassword?: string };
+    if (!target || !newPassword) {
+      res.status(400).json({ success: false, error: 'username and newPassword are required' });
+      return;
+    }
+    const user = await adminResetPassword(target, newPassword);
+    logger.info(`Root '${req.user!.username}' reset password for '${target}'`);
+    res.json({ success: true, user });
+  } catch (err: unknown) {
+    res.status(400).json({ success: false, error: err instanceof Error ? err.message : 'failed' });
+  }
 });
 
 // All /api routes require a valid JWT

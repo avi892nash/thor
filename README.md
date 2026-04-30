@@ -26,7 +26,16 @@ The installer will:
 
 ### First launch
 
-Open the frontend and create your admin account. Once at least one account exists, registration is locked — only signed-in users can create more accounts (any user can; there are no roles). All users share the same `rooms.json` (one server = one home).
+Open the frontend and sign in with the default credentials:
+
+```
+username: root
+password: thor
+```
+
+A yellow banner will demand a password change. Click **Change password** and pick a new one before doing anything else.
+
+Once root is set up, click **Manage users** in the header to add accounts for other people in the home. Created users get a temporary password (set by root) and are forced to rotate it on first login. Only `root` can create, delete, or reset passwords for other users; any user can change their own password. All users share the same `rooms.json` (one server = one home).
 
 ### Auto-update
 
