@@ -1,6 +1,6 @@
 {
   "name": "wiz-lights-server",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Server to control Philips WiZ lights with rhythm support",
   "main": "dist/server.js",
   "type": "module",
