@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsc && nodemon dist/server.js",
     "typecheck": "tsc --noEmit",
-    "bundle": "esbuild server.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/server.cjs --legal-comments=none --banner:js=\"const __IMPORT_META_URL=require('url').pathToFileURL(__filename).href;\" --define:import.meta.url=__IMPORT_META_URL",
+    "bundle": "node scripts/bundle.cjs",
     "build": "npm run typecheck && npm run bundle",
     "start": "node dist/server.cjs"
   },

@@ -167,14 +167,14 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: process.env['npm_package_version'] || '1.0.0',
+    version: process.env['THOR_VERSION'] || process.env['npm_package_version'] || '0.0.0-dev',
   });
 });
 
 // Frontend URL — returns the versioned frontend URL for the loader (no auth required)
 app.get('/frontend', (_req: Request, res: Response) => {
   const baseUrl = process.env['FRONTEND_BASE_URL'] || 'https://assets.devshram.com/projects/thor';
-  const version = process.env['npm_package_version'] || '1.0.0';
+  const version = process.env['THOR_VERSION'] || process.env['npm_package_version'] || '0.0.0-dev';
   res.json({ url: `${baseUrl}/v${version}/`, version });
 });
 
