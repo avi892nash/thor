@@ -28,31 +28,32 @@ jobs:
       - name: Verify package registered
         run: dpkg -s thor-server | grep -E "^(Status|Version):"
 
-      - name: Smoke-test server (health + auth round-trip)
+      - name: Smoke-test server (default root + auth round-trip)
         run: |
           [ -f /usr/lib/thor-server/dist/server.cjs ] || { echo "FAIL: server.cjs missing"; exit 1; }
           DATADIR=$(mktemp -d)
-          echo '{"users":[]}' > "$DATADIR/users.json"
           DATA_DIR=$DATADIR JWT_SECRET=ci-test-secret PORT=19877 \
             node /usr/lib/thor-server/dist/server.cjs &
           PID=$!
           sleep 2
           trap 'kill $PID 2>/dev/null || true' EXIT
 
-          HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:19877/health || echo "000")
-          [ "$HTTP" = "200" ] || { echo "FAIL: /health returned $HTTP"; exit 1; }
+          API=http://localhost:19877
+          fail() { echo "FAIL: $*"; exit 1; }
 
-          REG=$(curl -s -X POST http://localhost:19877/auth/register \
-            -H "Content-Type: application/json" \
-            -d '{"username":"smoke","password":"smoke-pw"}')
-          TOKEN=$(echo "$REG" | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
-          [ -n "$TOKEN" ] || { echo "FAIL: register did not return token: $REG"; exit 1; }
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" $API/health || echo "000")
+          [ "$HTTP" = "200" ] || fail "/health returned $HTTP"
+
+          TOKEN=$(curl -s -X POST $API/auth/login -H "Content-Type: application/json" \
+            -d '{"username":"root","password":"thor"}' \
+            | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+          [ -n "$TOKEN" ] || fail "default root login did not return token"
 
           AUTH_HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $TOKEN" http://localhost:19877/api/rooms)
-          [ "$AUTH_HTTP" = "200" ] || { echo "FAIL: /api/rooms with token returned $AUTH_HTTP"; exit 1; }
+            -H "Authorization: Bearer $TOKEN" $API/api/rooms)
+          [ "$AUTH_HTTP" = "200" ] || fail "/api/rooms with token returned $AUTH_HTTP"
 
-          echo "PASS: /health + auth round-trip ok"
+          echo "PASS: default root login + /api/rooms ok"
 
       - name: Verify systemd units
         run: |

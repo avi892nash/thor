@@ -3,98 +3,58 @@ import { RoomManager } from './components/RoomManager';
 import { apiService } from './services/apiService';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AuthGate } from './components/AuthGate';
-import { register as svcRegister } from './services/authService';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
+import { ManageUsersModal } from './components/ManageUsersModal';
+import { MustChangeBanner } from './components/MustChangeBanner';
 
-const Header = () => {
+const Header = ({
+  onChangePassword,
+  onManageUsers,
+}: {
+  onChangePassword: () => void;
+  onManageUsers: () => void;
+}) => {
   const { user, logout } = useAuth();
-  const [showAdd, setShowAdd] = useState(false);
-  const [newUsername, setNewUsername] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const submitNew = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      await svcRegister(newUsername, newPassword);
-      setShowAdd(false);
-      setNewUsername('');
-      setNewPassword('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'failed');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="flex items-center justify-end gap-3 mb-3 text-sm">
       <span className="text-gray-400">
         Signed in as <span className="text-gray-200 font-medium">{user?.username}</span>
+        {user?.role === 'root' && (
+          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-purple-700 text-purple-100">
+            root
+          </span>
+        )}
       </span>
       <button
-        onClick={() => setShowAdd((v) => !v)}
+        onClick={onChangePassword}
         className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-100"
       >
-        Add user
+        Change password
       </button>
+      {user?.role === 'root' && (
+        <button
+          onClick={onManageUsers}
+          className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-100"
+        >
+          Manage users
+        </button>
+      )}
       <button
         onClick={logout}
         className="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-100"
       >
         Logout
       </button>
-
-      {showAdd && (
-        <form
-          onSubmit={submitNew}
-          className="absolute right-4 top-12 z-10 bg-gray-800 border border-gray-700 rounded-lg p-4 w-72 space-y-2 shadow-xl"
-        >
-          <h3 className="text-gray-100 font-medium">Add user</h3>
-          <input
-            placeholder="Username"
-            value={newUsername}
-            onChange={(e) => setNewUsername(e.target.value)}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white"
-            required
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            minLength={6}
-            className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-white"
-            required
-          />
-          {error && <div className="text-xs text-red-400">{error}</div>}
-          <div className="flex gap-2 justify-end">
-            <button
-              type="button"
-              onClick={() => setShowAdd(false)}
-              className="px-2 py-1 text-gray-300 hover:text-white"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={busy}
-              className="px-3 py-1 rounded bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700"
-            >
-              {busy ? '…' : 'Create'}
-            </button>
-          </div>
-        </form>
-      )}
     </div>
   );
 };
 
 const Shell = () => {
+  const { user } = useAuth();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_lightStates, setLightStates] = useState<{ [ip: string]: boolean }>({});
+  const [showChangePw, setShowChangePw] = useState(false);
+  const [showManage, setShowManage] = useState(false);
 
   const toggleLight = useCallback(async (ip: string) => {
     try {
@@ -118,8 +78,14 @@ const Shell = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white">
+      {user?.mustChangePassword && (
+        <MustChangeBanner onChangeClick={() => setShowChangePw(true)} />
+      )}
       <div className="container mx-auto px-4 py-5 max-w-6xl bg-gray-900 relative">
-        <Header />
+        <Header
+          onChangePassword={() => setShowChangePw(true)}
+          onManageUsers={() => setShowManage(true)}
+        />
         <div className="flex items-center justify-center mb-5">
           <img src="/thor.png" alt="Thor Logo" className="w-16 h-16 mr-4" />
           <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
@@ -135,6 +101,9 @@ const Shell = () => {
           }}
         />
       </div>
+
+      {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
+      {showManage && <ManageUsersModal onClose={() => setShowManage(false)} />}
     </div>
   );
 };
