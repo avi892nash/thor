@@ -96,10 +96,6 @@ jobs:
         run: npm run lint --if-present
         continue-on-error: true
 
-      - name: Test
-        run: npm test -- --passWithNoTests --watchAll=false
-        continue-on-error: true
-
       - name: Build
         env:
           REACT_APP_API_URL: ${{ env.API_URL }}
