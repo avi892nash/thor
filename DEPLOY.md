@@ -9,7 +9,7 @@
                     │                       │
                     ▼                       ▼
         ┌───────────────────┐   ┌───────────────────────┐
-        │  devshram.com/    │   │  thor-api.devshram.in │
+        │  devshram.com/    │   │ thor-api.devshram.com │
         │  projects/thor/   │   │    (DietPi / RPi)     │
         │  (S3 + CloudFront)│   │   thor-server .deb    │
         └───────────────────┘   └───────────────────────┘
@@ -56,8 +56,8 @@ Edit `/etc/thor-server/.env` to change any setting:
 NODE_ENV=production
 PORT=3001
 THOR_API_KEY=<generated at install>
-ALLOWED_ORIGINS=https://thor.devshram.in
-FRONTEND_BASE_URL=https://devshram.com/projects/thor
+ALLOWED_ORIGINS=https://assets.devshram.com
+FRONTEND_BASE_URL=https://assets.devshram.com/projects/thor
 DATA_DIR=/etc/thor-server/data
 ```
 
