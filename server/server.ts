@@ -173,7 +173,7 @@ app.get('/health', (_req: Request, res: Response) => {
 
 // Frontend URL — returns the versioned frontend URL for the loader (no auth required)
 app.get('/frontend', (_req: Request, res: Response) => {
-  const baseUrl = process.env['FRONTEND_BASE_URL'] || 'https://devshram.com/projects/thor';
+  const baseUrl = process.env['FRONTEND_BASE_URL'] || 'https://assets.devshram.com/projects/thor';
   const version = process.env['npm_package_version'] || '1.0.0';
   res.json({ url: `${baseUrl}/v${version}/`, version });
 });
