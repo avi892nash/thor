@@ -56,6 +56,25 @@ curl -fsSL https://github.com/avi892nash/thor/releases/latest/download/thor-api.
   -o /tmp/thor.deb && sudo apt install /tmp/thor.deb
 ```
 
+### Uninstall
+
+```bash
+sudo apt remove thor-server
+```
+
+**This is destructive.** `apt remove` and `apt purge` both run a full cleanup:
+
+- All files in `/etc/thor-server/` (including `.env`, `users.json`, `rooms.json`)
+- Logs in `/var/log/thor-server/`
+- State in `/var/lib/thor-server/` (e.g. installed-tag)
+- The `thor` system user
+
+If you want to preserve any of it across an uninstall/reinstall cycle, back it up first:
+
+```bash
+sudo cp -a /etc/thor-server /tmp/thor-backup
+```
+
 ---
 
 ## Frontend Deploy (GitHub Actions → S3)

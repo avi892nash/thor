@@ -1,0 +1,34 @@
+#!/bin/bash
+# Thor server — post-removal cleanup
+# Runs AFTER files shipped in the .deb have been removed by dpkg.
+# Both `apt remove` and `apt purge` perform a full cleanup: config, data,
+# logs, state directory, and the system user are all deleted.
+# Upgrades pass "upgrade" / "failed-upgrade" — those skip cleanup.
+
+set -e
+
+case "$1" in
+  remove|purge)
+    # Remove user-config + state that dpkg doesn't track because they were
+    # generated at runtime (postinst, the server itself, the auto-updater).
+    rm -rf /etc/thor-server
+    rm -rf /var/log/thor-server
+    rm -rf /var/lib/thor-server
+
+    # Reload systemd so it forgets the unit files we just removed.
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload 2>/dev/null || true
+    fi
+
+    # Drop the system user — fails silently if a process still holds it.
+    if id thor &>/dev/null; then
+      userdel thor 2>/dev/null || true
+    fi
+    ;;
+
+  upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+    # Upgrade flow — keep everything intact.
+    ;;
+esac
+
+exit 0
