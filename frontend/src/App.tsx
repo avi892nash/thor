@@ -87,7 +87,7 @@ const Shell = () => {
           onManageUsers={() => setShowManage(true)}
         />
         <div className="flex items-center justify-center mb-5">
-          <img src="/thor.png" alt="Thor Logo" className="w-16 h-16 mr-4" />
+          <img src={`${process.env.PUBLIC_URL}/thor.png`} alt="Thor Logo" className="w-16 h-16 mr-4" />
           <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
             Thor: Smart Home Automation
           </h1>

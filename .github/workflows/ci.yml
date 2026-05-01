@@ -363,50 +363,52 @@ jobs:
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Thor</title>
             <style>
-              *{margin:0;padding:0;box-sizing:border-box}
-              body{background:#0f172a;color:#f1f5f9;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
-              .card{text-align:center;padding:2rem;max-width:400px}
-              h1{font-size:2rem;font-weight:700;margin-bottom:.5rem;color:#e2e8f0}
-              .status{font-size:1rem;color:#94a3b8;margin-bottom:1.5rem}
+              html,body{margin:0;padding:0;height:100%;background:#0f172a;color:#f1f5f9;font-family:system-ui,sans-serif;overflow:hidden}
+              #app-frame{width:100vw;height:100vh;border:0;display:block;background:#0f172a}
+              .boot{display:flex;align-items:center;justify-content:center;height:100%}
+              .card{text-align:center;padding:2rem;max-width:420px}
+              .card h1{font-size:2rem;font-weight:700;margin-bottom:.5rem;color:#e2e8f0}
+              .status{font-size:1rem;color:#94a3b8}
               .dot{display:inline-block;animation:blink 1.2s infinite}
               .dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
               @keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
-              .error{background:#450a0a;border:1px solid #7f1d1d;border-radius:.75rem;padding:1.25rem;color:#fca5a5}
-              .error h2{font-size:1.1rem;margin-bottom:.5rem;color:#f87171}
-              .error p{font-size:.875rem;margin-bottom:1rem}
-              button{background:#1e40af;color:#fff;border:none;padding:.6rem 1.5rem;border-radius:.5rem;cursor:pointer;font-size:.875rem}
+              .err{color:#fca5a5}
+              button{background:#1e40af;color:#fff;border:none;padding:.6rem 1.5rem;border-radius:.5rem;cursor:pointer;font-size:.875rem;margin-top:.75rem}
               button:hover{background:#1d4ed8}
               .version{font-size:.75rem;color:#475569;margin-top:1.5rem}
             </style>
           </head>
           <body>
-            <div class="card">
-              <h1>Thor</h1>
-              <div id="loading"><p class="status">Connecting<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p></div>
-              <div id="error" style="display:none">
-                <div class="error">
-                  <h2>Backend Offline</h2>
-                  <p id="error-msg">Could not reach the Thor server.</p>
-                  <button onclick="load()">Retry</button>
-                </div>
+            <div id="boot" class="boot">
+              <div class="card">
+                <h1>Thor</h1>
+                <p id="msg" class="status">Connecting<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p>
+                <button id="retry" style="display:none" onclick="boot()">Retry</button>
+                <p class="version">v${FULL}</p>
               </div>
-              <p class="version">v${FULL}</p>
             </div>
             <script>
               const API='${{ env.API_URL }}';
-              function load(){
-                document.getElementById('loading').style.display='';
-                document.getElementById('error').style.display='none';
-                fetch(API+'/frontend',{signal:AbortSignal.timeout(8000)})
-                  .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
-                  .then(d=>{window.location.replace(d.url);})
-                  .catch(e=>{
-                    document.getElementById('loading').style.display='none';
-                    document.getElementById('error').style.display='';
-                    document.getElementById('error-msg').textContent=e.message||'Could not reach the Thor server.';
-                  });
+              function showError(t){
+                var m=document.getElementById('msg');
+                m.className='err';
+                m.textContent=t;
+                document.getElementById('retry').style.display='';
               }
-              load();
+              function boot(){
+                document.getElementById('retry').style.display='none';
+                fetch(API+'/frontend',{signal:AbortSignal.timeout(8000)})
+                  .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+                  .then(function(d){
+                    var f=document.createElement('iframe');
+                    f.id='app-frame';
+                    f.title='Thor';
+                    f.src=d.url;
+                    document.body.replaceChild(f, document.getElementById('boot'));
+                  })
+                  .catch(function(e){showError(e.message||'Could not reach the Thor server.');});
+              }
+              boot();
             </script>
           </body>
           </html>
