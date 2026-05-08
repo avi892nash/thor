@@ -65,7 +65,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.on('finish', () => {
     const ms = Date.now() - start;
     const level = res.statusCode >= 500 ? 'error' : 'info';
-    logger[level](`${req.method} ${req.path} → ${res.statusCode} (${ms}ms)`);
+    logger[level](`${req.method} ${req.originalUrl} → ${res.statusCode} (${ms}ms)`);
   });
   next();
 });

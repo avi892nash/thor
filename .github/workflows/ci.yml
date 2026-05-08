@@ -285,9 +285,11 @@ jobs:
           DEEP_HTTP=$(curl -s -o /dev/null -w "%{http_code}" $API/some/client-route)
           [ "$DEEP_HTTP" = "200" ] || fail "SPA fallback returned $DEEP_HTTP (expected 200)"
 
-          # 11. /frontend endpoint is gone (was the old loader contract)
-          FE_HTTP=$(curl -s -o /dev/null -w "%{http_code}" $API/frontend)
-          [ "$FE_HTTP" = "200" ] && fail "/frontend should no longer return JSON loader contract"
+          # 11. /frontend no longer returns the JSON loader contract — the path
+          # is now just an SPA route, so it serves index.html (HTML, not JSON).
+          FE_BODY=$(curl -s $API/frontend)
+          echo "$FE_BODY" | grep -qE '"url"\s*:\s*"http' && fail "/frontend still returns loader JSON contract"
+          echo "$FE_BODY" | grep -qi '<html'             || fail "/frontend should fall through to SPA HTML"
 
           echo "PASS: roles, password change, user CRUD, gated /api, static SPA"
 
