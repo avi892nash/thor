@@ -3,8 +3,9 @@ import cors from 'cors';
 import http from 'http';
 import os from 'os';
 import fs from 'fs/promises';
+import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, sep } from 'path';
 import { WizLightManager } from './lib/wizLightManager.js';
 import { RoomsData, NetworkInterface } from './shared/types.js';
 import { logger } from './lib/logger.js';
@@ -50,17 +51,11 @@ interface DiscoveryRequest {
 const app = express();
 const server = http.createServer(app);
 
-const ALLOWED_ORIGINS = (process.env['ALLOWED_ORIGINS'] || 'http://localhost:3000').split(',');
-
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin) || ALLOWED_ORIGINS.includes('*')) {
-      return callback(null, true);
-    }
-    callback(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
-}));
+// Frontend is served from this same origin in production (see express.static below),
+// so CORS only matters for local dev where the React dev server runs on a different port.
+if (process.env['NODE_ENV'] !== 'production') {
+  app.use(cors({ origin: true, credentials: true }));
+}
 
 app.use(express.json());
 
@@ -169,13 +164,6 @@ app.get('/health', (_req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
     version: process.env['THOR_VERSION'] || process.env['npm_package_version'] || '0.0.0-dev',
   });
-});
-
-// Frontend URL — returns the versioned frontend URL for the loader (no auth required)
-app.get('/frontend', (_req: Request, res: Response) => {
-  const baseUrl = process.env['FRONTEND_BASE_URL'] || 'https://assets.devshram.com/projects/thor';
-  const version = process.env['THOR_VERSION'] || process.env['npm_package_version'] || '0.0.0-dev';
-  res.json({ url: `${baseUrl}/v${version}/`, version });
 });
 
 // ── Auth routes ────────────────────────────────────────────────────────────
@@ -632,6 +620,32 @@ app.post('/api/rooms', async (req: Request, res: Response) => {
 app.get('/api/rooms', (_req: Request, res: Response) => {
   res.json(roomsData);
 });
+
+// ── Static frontend ────────────────────────────────────────────────────────
+// In production the .deb installs the React build to /usr/lib/thor-server/public/.
+// In dev, point PUBLIC_DIR at frontend/build (or use the CRA dev server proxy).
+const publicDir = process.env['PUBLIC_DIR'] || join(__dirname, '..', 'public');
+
+if (existsSync(publicDir)) {
+  app.use(express.static(publicDir, {
+    index: false,
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.html')) {
+        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+      } else if (filePath.includes(`${sep}static${sep}`)) {
+        res.set('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    },
+  }));
+
+  // SPA fallback — any non-API GET returns index.html so client-side routes work.
+  app.get(/^\/(?!api\/|auth\/|health(?:\/|$)).*/, (_req: Request, res: Response) => {
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.sendFile(join(publicDir, 'index.html'));
+  });
+} else {
+  logger.warn(`PUBLIC_DIR ${publicDir} does not exist — frontend will not be served. Set PUBLIC_DIR or build the frontend into ${publicDir}.`);
+}
 
 // Error handling middleware
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

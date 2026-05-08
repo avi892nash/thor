@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "homepage": ".",
+  "proxy": "http://localhost:3001",
   "dependencies": {
     "@types/node": "^16.18.126",
     "@types/react": "^19.1.8",

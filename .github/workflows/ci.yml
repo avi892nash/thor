@@ -16,23 +16,19 @@ on:
 
 env:
   NODE_VERSION: '20'
-  AWS_REGION: 'ap-south-1'
-  S3_BUCKET: 'devshram.com'
-  S3_PREFIX: 'projects/thor'
-  CLOUDFRONT_DISTRIBUTION_ID: 'E2RU8A6DN1OCFF'
-  AWS_ROLE_ARN: 'arn:aws:iam::532197675314:role/avi89nash_s3_upload'
-  API_URL: 'https://thor-api.devshram.com'
 
 # Pipeline shape (PR):
 #
 #   commitlint
-#   version ──► build-frontend
-#           └─► build-server ──► test-deb
+#   version ──► build-frontend ──► build-server ──► test-deb
 #
 # Pipeline shape (push to main, adds release):
 #
-#   version ──► build-frontend ──────────────┐
-#           └─► build-server ──► test-deb ───┴──► release
+#   version ──► build-frontend ──► build-server ──► test-deb ──► release
+#
+# The .deb bundles the React build at /usr/lib/thor-server/public, so the
+# Thor server (Express) serves both the API and the SPA on the same origin.
+# Cloudflare in front of the Pi caches static assets at the edge.
 #
 # Post-release (test-release.yml): release published ──► test-published-deb
 
@@ -98,7 +94,8 @@ jobs:
 
       - name: Build
         env:
-          REACT_APP_API_URL: ${{ env.API_URL }}
+          # Empty REACT_APP_API_URL → relative URLs (same-origin in production).
+          REACT_APP_API_URL: ''
           REACT_APP_VERSION: ${{ needs.version.outputs.full }}
           CI: false
         run: npm run build
@@ -110,12 +107,12 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------------------
-  # Build server .deb
+  # Build server .deb (bundles the React build into /usr/lib/thor-server/public)
   # ---------------------------------------------------------------------------
   build-server:
     name: '[Server] Build .deb'
     runs-on: ubuntu-latest
-    needs: version
+    needs: [version, build-frontend]
     steps:
       - uses: actions/checkout@v4
 
@@ -133,6 +130,12 @@ jobs:
         working-directory: server
         run: npm run build
 
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend-build
+
       - name: Stage & build .deb
         run: |
           FULL="${{ needs.version.outputs.full }}"
@@ -144,6 +147,12 @@ jobs:
 
           mkdir -p "$STAGING/usr/lib/thor-server"
           cp -r server/dist "$STAGING/usr/lib/thor-server/dist"
+
+          # Bundle the React build alongside the server. Express serves it.
+          mkdir -p "$STAGING/usr/lib/thor-server/public"
+          cp -r frontend-build/. "$STAGING/usr/lib/thor-server/public/"
+          [ -f "$STAGING/usr/lib/thor-server/public/index.html" ] \
+            || { echo "ERROR: frontend public/index.html missing in staging"; exit 1; }
 
           mkdir -p "$STAGING/usr/bin"
           cp server/package/usr/bin/thor-server-update "$STAGING/usr/bin/thor-server-update"
@@ -194,10 +203,11 @@ jobs:
       - name: Verify package registered
         run: dpkg -s thor-server | grep -E "^(Status|Version):"
 
-      - name: Smoke-test server (roles + password change + user CRUD)
+      - name: Smoke-test server (roles + password change + user CRUD + static SPA)
         run: |
           DATADIR=$(mktemp -d)
           DATA_DIR=$DATADIR JWT_SECRET=ci-test-secret PORT=19877 \
+            PUBLIC_DIR=/usr/lib/thor-server/public NODE_ENV=production \
             node /usr/lib/thor-server/dist/server.cjs &
           PID=$!
           sleep 2
@@ -265,7 +275,21 @@ jobs:
             -H "Content-Type: application/json" -d '{"username":"x","password":"y"}')
           [ "$REG_HTTP" = "404" ] || fail "/auth/register should be 404 (got $REG_HTTP)"
 
-          echo "PASS: roles, password change, user CRUD, gated /api"
+          # 9. SPA: GET / returns the React index.html with no-cache headers
+          ROOT_HTTP=$(curl -s -o /dev/null -w "%{http_code}" $API/)
+          [ "$ROOT_HTTP" = "200" ] || fail "GET / returned $ROOT_HTTP (expected 200)"
+          curl -s $API/ | grep -qi '<html'        || fail "GET / did not return HTML"
+          curl -sI $API/ | grep -qi 'no-cache'    || fail "GET / missing no-cache header"
+
+          # 10. SPA fallback: deep link returns index.html, not 404
+          DEEP_HTTP=$(curl -s -o /dev/null -w "%{http_code}" $API/some/client-route)
+          [ "$DEEP_HTTP" = "200" ] || fail "SPA fallback returned $DEEP_HTTP (expected 200)"
+
+          # 11. /frontend endpoint is gone (was the old loader contract)
+          FE_HTTP=$(curl -s -o /dev/null -w "%{http_code}" $API/frontend)
+          [ "$FE_HTTP" = "200" ] && fail "/frontend should no longer return JSON loader contract"
+
+          echo "PASS: roles, password change, user CRUD, gated /api, static SPA"
 
       - name: Verify systemd units
         run: |
@@ -277,15 +301,15 @@ jobs:
           echo "PASS: all systemd units present"
 
   # ---------------------------------------------------------------------------
-  # Combined release — runs only when BOTH builds succeed
+  # Release — uploads thor-api.deb (which bundles the frontend) to a GitHub
+  # release via semantic-release. Runs only after the .deb has passed test-deb.
   # ---------------------------------------------------------------------------
   release:
     name: 'Release v${{ needs.version.outputs.full }}'
     runs-on: ubuntu-latest
-    needs: [version, build-frontend, test-deb]
+    needs: [version, test-deb]
     if: github.event_name != 'pull_request'
     permissions:
-      id-token: write
       contents: write
     steps:
       - uses: actions/checkout@v4
@@ -294,137 +318,8 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: frontend-build
-          path: frontend-build
-
-      - uses: actions/download-artifact@v4
-        with:
           name: server-deb
           path: .
-
-      # ── Validate frontend ────────────────────────────────────────────────
-      - name: Validate frontend build
-        run: |
-          [ -f frontend-build/index.html ] || { echo "ERROR: index.html missing"; exit 1; }
-          JS=$(find frontend-build/static/js  -name "*.js"  | wc -l)
-          CSS=$(find frontend-build/static/css -name "*.css" | wc -l)
-          [ "$JS"  -gt 0 ] || { echo "ERROR: no JS files";  exit 1; }
-          [ "$CSS" -gt 0 ] || { echo "ERROR: no CSS files"; exit 1; }
-          echo "Frontend OK — JS: $JS  CSS: $CSS"
-
-      # ── Check API health (soft — warns but doesn't block release) ────────
-      - name: Check API health
-        run: |
-          for i in 1 2 3; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              "${{ env.API_URL }}/health" --connect-timeout 10 || echo "000")
-            [ "$STATUS" = "200" ] && { echo "API healthy (HTTP $STATUS)"; break; }
-            echo "Attempt $i: HTTP $STATUS"
-            sleep 5
-          done
-          echo "Continuing with release"
-
-      # ── AWS credentials ──────────────────────────────────────────────────
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      # ── Deploy frontend to S3 ────────────────────────────────────────────
-      - name: Deploy frontend to S3
-        run: |
-          BASE="${{ needs.version.outputs.base }}"
-          DEST="s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/v${BASE}"
-          echo "Deploying v${BASE} → $DEST"
-
-          aws s3 sync frontend-build/ "$DEST" \
-            --delete \
-            --cache-control "max-age=31536000,public" \
-            --exclude "index.html" \
-            --exclude "*.json"
-
-          aws s3 cp frontend-build/index.html "$DEST/index.html" \
-            --cache-control "no-cache,no-store,must-revalidate"
-
-          find frontend-build -name "*.json" | while read f; do
-            aws s3 cp "$f" "$DEST/${f#frontend-build/}" \
-              --cache-control "no-cache,no-store,must-revalidate"
-          done
-
-      # ── Upload loader ────────────────────────────────────────────────────
-      - name: Upload loader index.html
-        run: |
-          FULL="${{ needs.version.outputs.full }}"
-          cat > /tmp/index.html << LOADER
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Thor</title>
-            <style>
-              html,body{margin:0;padding:0;height:100%;background:#0f172a;color:#f1f5f9;font-family:system-ui,sans-serif;overflow:hidden}
-              #app-frame{width:100vw;height:100vh;border:0;display:block;background:#0f172a}
-              .boot{display:flex;align-items:center;justify-content:center;height:100%}
-              .card{text-align:center;padding:2rem;max-width:420px}
-              .card h1{font-size:2rem;font-weight:700;margin-bottom:.5rem;color:#e2e8f0}
-              .status{font-size:1rem;color:#94a3b8}
-              .dot{display:inline-block;animation:blink 1.2s infinite}
-              .dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
-              @keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
-              .err{color:#fca5a5}
-              button{background:#1e40af;color:#fff;border:none;padding:.6rem 1.5rem;border-radius:.5rem;cursor:pointer;font-size:.875rem;margin-top:.75rem}
-              button:hover{background:#1d4ed8}
-              .version{font-size:.75rem;color:#475569;margin-top:1.5rem}
-            </style>
-          </head>
-          <body>
-            <div id="boot" class="boot">
-              <div class="card">
-                <h1>Thor</h1>
-                <p id="msg" class="status">Connecting<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></p>
-                <button id="retry" style="display:none" onclick="boot()">Retry</button>
-                <p class="version">v${FULL}</p>
-              </div>
-            </div>
-            <script>
-              const API='${{ env.API_URL }}';
-              function showError(t){
-                var m=document.getElementById('msg');
-                m.className='err';
-                m.textContent=t;
-                document.getElementById('retry').style.display='';
-              }
-              function boot(){
-                document.getElementById('retry').style.display='none';
-                fetch(API+'/frontend',{signal:AbortSignal.timeout(8000)})
-                  .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
-                  .then(function(d){
-                    var f=document.createElement('iframe');
-                    f.id='app-frame';
-                    f.title='Thor';
-                    f.src=d.url;
-                    document.body.replaceChild(f, document.getElementById('boot'));
-                  })
-                  .catch(function(e){showError(e.message||'Could not reach the Thor server.');});
-              }
-              boot();
-            </script>
-          </body>
-          </html>
-          LOADER
-
-          aws s3 cp /tmp/index.html \
-            "s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/index.html" \
-            --cache-control "no-cache,no-store,must-revalidate" \
-            --content-type "text/html"
-
-      # ── Invalidate CloudFront ────────────────────────────────────────────
-      - name: Invalidate CloudFront
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/${{ env.S3_PREFIX }}/*"
 
       # ── Publish via semantic-release ─────────────────────────────────────
       # Bumps server/package.json, commits [skip ci], tags v*, creates GH
@@ -443,15 +338,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
 
-      # ── Summary ──────────────────────────────────────────────────────────
       - name: Summary
         run: |
-          BASE="${{ needs.version.outputs.base }}"
           FULL="${{ needs.version.outputs.full }}"
           echo "======================================="
           echo "  Released Thor v${FULL}"
           echo "======================================="
-          echo "  Frontend: s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}/v${BASE}/"
-          echo "  Server:   thor-api.deb @ github release 'latest'"
+          echo "  Artifact: thor-api.deb (bundles server + frontend)"
           echo "  Commit:   ${{ github.sha }}"
           echo "======================================="

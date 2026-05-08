@@ -3,23 +3,32 @@
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         Internet                             │
-└─────────────────────────────────────────────────────────────┘
-                    │                       │
-                    ▼                       ▼
-        ┌───────────────────┐   ┌───────────────────────┐
-        │  devshram.com/    │   │ thor-api.devshram.com │
-        │  projects/thor/   │   │    (DietPi / RPi)     │
-        │  (S3 + CloudFront)│   │   thor-server .deb    │
-        └───────────────────┘   └───────────────────────┘
-                                          │
-                                          ▼
-                                ┌───────────────────┐
-                                │   WiZ Bulbs       │
-                                │  (Local Network)  │
-                                └───────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                       Internet                           │
+└─────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+                  ┌──────────────────┐
+                  │  Cloudflare CDN  │   (proxied DNS, edge cache)
+                  └──────────────────┘
+                            │
+                            ▼
+                ┌────────────────────────┐
+                │ thor-api.devshram.com  │
+                │     (DietPi / RPi)     │
+                │  thor-server .deb      │
+                │  ├─ Express API        │
+                │  └─ React SPA (public/)│
+                └────────────────────────┘
+                            │
+                            ▼
+                  ┌──────────────────┐
+                  │    WiZ Bulbs     │
+                  │ (Local Network)  │
+                  └──────────────────┘
 ```
+
+A single `.deb` artifact contains both the server and the React build. Express serves the SPA from `/usr/lib/thor-server/public/` at the same origin as the API. Cloudflare caches static assets at the edge — content-hashed filenames make cache invalidation automatic on each deploy.
 
 ---
 
@@ -28,13 +37,14 @@
 ### First install
 
 ```bash
-curl -fsSL https://github.com/avi892nash/thor/releases/download/server-latest/thor-server_1.0.0_all.deb \
+curl -fsSL https://github.com/avi892nash/thor/releases/latest/download/thor-api.deb \
   -o /tmp/thor.deb
 sudo apt install /tmp/thor.deb
 ```
 
 - Creates system user `thor`
-- Installs to `/usr/lib/thor-server/`
+- Installs server bundle to `/usr/lib/thor-server/dist/server.cjs`
+- Installs React build to `/usr/lib/thor-server/public/`
 - Config at `/etc/thor-server/.env` (preserved on upgrade)
 - Data at `/etc/thor-server/data/rooms.json` (never overwritten on upgrade)
 - Starts `thor-server.service` on port `3001`
@@ -49,6 +59,8 @@ Every 5 minutes, `thor-update.timer` runs `thor-server-update`:
 4. Records the new tag in `/var/lib/thor-server/installed-tag`
 5. The service restarts automatically via `postinst`
 
+Frontend and backend update together — they always ship as one artifact.
+
 ### Config
 
 Edit `/etc/thor-server/.env` to change any setting:
@@ -56,10 +68,10 @@ Edit `/etc/thor-server/.env` to change any setting:
 ```ini
 NODE_ENV=production
 PORT=3001
-THOR_API_KEY=<generated at install>
-ALLOWED_ORIGINS=https://assets.devshram.com
-FRONTEND_BASE_URL=https://assets.devshram.com/projects/thor
 DATA_DIR=/etc/thor-server/data
+LOG_DIR=/var/log/thor-server
+PUBLIC_DIR=/usr/lib/thor-server/public
+JWT_SECRET=<generated at install>
 ```
 
 After editing: `sudo systemctl restart thor-server`
@@ -71,33 +83,50 @@ systemctl status thor-server            # service status
 journalctl -u thor-server -f            # live logs
 systemctl status thor-update.timer      # auto-update timer
 sudo thor-server-update                 # force update check now
-cat /etc/thor-server/.env               # view config / API key
+cat /etc/thor-server/.env               # view config
 ```
 
 ---
 
-## Frontend Deployment (S3 + CloudFront)
+## Cloudflare setup
 
-Push to `main` triggers the `deploy-frontend.yml` workflow when `frontend/` files change.
+DNS for `devshram.com` is on Cloudflare. To make the SPA edge-cached:
 
-### What the workflow does
+1. **Proxy `thor-api.devshram.com`** — set the DNS record to "Proxied" (orange cloud). Cloudflare now sits in front of the Pi.
+2. **Cache rules** for the zone:
+   - `URI Path starts with /static/` → Edge TTL 1 year, Browser TTL 1 year (CRA's hashed assets are immutable).
+   - `URI Path eq /` (or `/index.html`) → Bypass cache, or short Edge TTL (~30s). The HTML must reflect new releases promptly.
+   - `URI Path starts with /api/` or `/auth/` or `/health` → Bypass cache. API responses must hit the origin.
 
-1. Builds the React app with `REACT_APP_VERSION` injected from `package.json`
-2. Uploads static assets to `s3://devshram.com/projects/thor/v{version}/`
-3. Generates a loader `index.html` that calls `GET /frontend` on the backend to fetch the versioned URL, then redirects
-4. Uploads the loader to `s3://devshram.com/projects/thor/index.html`
-5. Invalidates the CloudFront distribution at `/projects/thor/*`
+The server already returns the right `Cache-Control` headers per file type, so Cloudflare honors them by default — explicit Cache Rules are belt-and-suspenders.
+
+### Optional: redirect on bare API host
+
+If you want browser visits to `thor-api.devshram.com/` to land on the SPA, no extra rule is needed — `/` returns `index.html` from the same origin. The SPA is the API's "/".
+
+---
+
+## Frontend Deployment (CI/CD)
+
+Push to `main` triggers `.github/workflows/ci.yml`:
+
+1. **build-frontend** — `npm run build` produces `frontend/build/` with content-hashed assets.
+2. **build-server** — bundles `server.cjs` with esbuild, then stages everything (server bundle + frontend build + systemd units + DEBIAN scripts) into a single `thor-api.deb`.
+3. **test-deb** — installs the `.deb` in CI, runs the server, smoke-tests the API endpoints AND verifies that `GET /` returns the SPA HTML.
+4. **release** — semantic-release bumps the version, tags, creates a GitHub release with `thor-api.deb` attached.
+
+No S3, no CloudFront, no separate asset host. The Pi serves everything; Cloudflare caches it.
 
 ### Versioning
 
-- Each frontend release lives at a permanent versioned path (`/projects/thor/v1.0.0/`)
-- The loader at `/projects/thor/` always points to the version the backend advertises via `GET /frontend`
-- This keeps backend and frontend versions in sync
+Each release attaches `thor-api.deb` to a GitHub release tagged `v{semver}`. The `thor-update.timer` on the Pi installs new versions automatically. To roll back, install an older `.deb` manually:
 
-### Authentication
+```bash
+sudo apt install ./thor-api-1.2.7.deb   # downgrade
+```
 
-Uses AWS OIDC (no stored keys). The IAM role `avi89nash_s3_upload` is trusted by this repository.
+`/var/lib/thor-server/installed-tag` records the current version.
 
 ### Manual deploy
 
-Go to **Actions → Deploy Frontend → Run workflow**.
+Go to **Actions → Thor CI/CD → Run workflow** to trigger a release without a code change.
