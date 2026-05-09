@@ -77,8 +77,8 @@ sudo cp -a /etc/thor-server /tmp/thor-backup
 
 ---
 
-## Frontend Deploy (GitHub Actions → S3)
+## Frontend Deploy
 
-Push to `main` deploys automatically when `frontend/` files change.
+The React build ships inside `thor-api.deb` and is served by Express on the same origin as the API (`/usr/lib/thor-server/public/`). Cloudflare in front of the Pi caches static assets at the edge — CRA's content-hashed filenames make cache invalidation automatic.
 
-The frontend is versioned — each release uploads to `s3://devshram.com/projects/thor/v{version}/` and a loader `index.html` at `projects/thor/index.html` fetches the correct version URL from the backend.
+Push to `main` builds the frontend, packs it into `thor-api.deb` alongside `server.cjs`, and publishes the `.deb` to a GitHub release. The Pi's auto-update timer picks it up within 5 minutes, restarting the server with the new frontend and backend together.

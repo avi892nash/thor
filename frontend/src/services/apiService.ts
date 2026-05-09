@@ -16,7 +16,9 @@ export interface LightStatus {
   offline?: boolean;
 }
 
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+// Empty string → relative URLs, served same-origin by the Thor server in production.
+// In dev, the CRA dev server proxies /api, /auth, /health to localhost:3001 (see frontend/package.json "proxy").
+const API_BASE = process.env.REACT_APP_API_URL || '';
 
 const getHeaders = (): Record<string, string> => {
   const headers: Record<string, string> = {
