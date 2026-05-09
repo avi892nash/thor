@@ -269,43 +269,60 @@ export const RoomManager: React.FC<RoomManagerProps> = ({
     setNewRoomName('');
   };
 
+  // Find which room (if any) already owns a device with this MAC. Devices live
+  // in exactly one room — checking globally prevents the discover list from
+  // offering a bulb that's already assigned elsewhere, and keeps the add
+  // handlers from creating cross-room duplicates if state goes stale.
+  const findRoomOwningMac = (mac: string | undefined): Room | undefined => {
+    if (!mac) return undefined;
+    return rooms.find(r => (r.devices || []).some(d => d.mac === mac));
+  };
+
   const addDevicesToRoom = (roomId: string, deviceMacs: string[]) => {
     const devicesToAdd: IoTDevice[] = deviceMacs
       .map(mac => {
         const light = discoveredLights.find(l => l.mac === mac);
-        if (light && light.mac) {
-          return {
-            id: light.mac,  // Use MAC as device ID
-            type: IoTDeviceType.WIZ_LIGHT,
-            mac: light.mac,
-            ip: light.ip,
-            port: light.port,
-            name: light.name || `Bulb ${light.mac.slice(-4)}`,
-            state: light.state ?? false,
-            properties: light.temperature ? {
-              temperature: light.temperature
-            } : (light.r !== undefined && light.g !== undefined && light.b !== undefined && light.brightness) ? {
-              color: {
-                r: light.r,
-                g: light.g,
-                b: light.b
-              },
-              brightness: light.brightness
-            } : {}
-          };
+        if (!light || !light.mac) return null;
+        // Skip any MAC that already belongs to a room (this one or another).
+        const owner = findRoomOwningMac(light.mac);
+        if (owner) {
+          console.warn(`Skipping ${light.mac} — already in room "${owner.name}"`);
+          return null;
         }
-        return null;
+        return {
+          id: light.mac,  // Use MAC as device ID
+          type: IoTDeviceType.WIZ_LIGHT,
+          mac: light.mac,
+          ip: light.ip,
+          port: light.port,
+          name: light.name || `Bulb ${light.mac.slice(-4)}`,
+          state: light.state ?? false,
+          properties: light.temperature ? {
+            temperature: light.temperature
+          } : (light.r !== undefined && light.g !== undefined && light.b !== undefined && light.brightness) ? {
+            color: {
+              r: light.r,
+              g: light.g,
+              b: light.b
+            },
+            brightness: light.brightness
+          } : {}
+        };
       })
-      .filter(device => device !== null) as IoTDevice[];
+      .filter((device): device is IoTDevice => device !== null);
+
+    if (devicesToAdd.length === 0) {
+      setShowAddDeviceForm('');
+      setSelectedDevices([]);
+      return;
+    }
 
     const updatedRooms = rooms.map(room => {
       if (room.id === roomId) {
         const devices = room.devices || [];
-        const existingDeviceMacs = devices.map(d => d.mac);
-        const newDevices = devicesToAdd.filter(device => !existingDeviceMacs.includes(device.mac));
         return {
           ...room,
-          devices: [...devices, ...newDevices]
+          devices: [...devices, ...devicesToAdd]
         };
       }
       return room;
@@ -323,6 +340,13 @@ export const RoomManager: React.FC<RoomManagerProps> = ({
 
     const mac = deviceMac.trim().toLowerCase().replace(/[:-]/g, '');
 
+    // Reject MACs that already belong to any room — devices live in exactly one.
+    const owner = findRoomOwningMac(mac);
+    if (owner) {
+      console.warn(`Cannot add ${mac} — already in room "${owner.name}"`);
+      return;
+    }
+
     const newDevice: IoTDevice = {
       id: mac,  // Use MAC as device ID
       type: IoTDeviceType.WIZ_LIGHT,
@@ -337,13 +361,10 @@ export const RoomManager: React.FC<RoomManagerProps> = ({
     const updatedRooms = rooms.map(room => {
       if (room.id === roomId) {
         const devices = room.devices || [];
-        const deviceExists = devices.some(d => d.mac === newDevice.mac);
-        if (!deviceExists) {
-          return {
-            ...room,
-            devices: [...devices, newDevice]
-          };
-        }
+        return {
+          ...room,
+          devices: [...devices, newDevice]
+        };
       }
       return room;
     });
@@ -719,8 +740,21 @@ export const RoomManager: React.FC<RoomManagerProps> = ({
                         <>
                           <div className="space-y-2 mb-4">
                             {discoveredLights.filter(l => l.mac).map(light => {
-                              const existingDeviceMacs = rooms.find(r => r.id === room.id)?.devices?.map(d => d.mac) || [];
-                              const isAlreadyAdded = light.mac ? existingDeviceMacs.includes(light.mac) : false;
+                              // A bulb belongs to at most one room. Look across all rooms,
+                              // not just this one, so a bulb in another room is shown as
+                              // disabled with its current room's name (instead of looking
+                              // free to assign here).
+                              const ownerRoom = findRoomOwningMac(light.mac);
+                              const isAlreadyAdded = !!ownerRoom;
+                              const isInThisRoom = ownerRoom?.id === room.id;
+                              const badgeLabel = isInThisRoom
+                                ? 'Added'
+                                : ownerRoom
+                                ? `In ${ownerRoom.name}`
+                                : '';
+                              const badgeClass = isInThisRoom
+                                ? 'bg-green-500 text-white'
+                                : 'bg-gray-500 text-white';
 
                               return (
                                 <div key={light.mac} className={`flex items-center gap-3 p-3 rounded-lg ${isAlreadyAdded ? 'bg-gray-600/30 border border-gray-500/30' : 'bg-gray-600/50 border border-white/20 hover:bg-gray-600/70'}`}>
@@ -743,7 +777,7 @@ export const RoomManager: React.FC<RoomManagerProps> = ({
                                     <div className="text-white">
                                       <div className="flex items-center gap-2">
                                         <strong>{light.name || `Bulb ${light.mac?.slice(-4)}`}</strong>
-                                        {isAlreadyAdded && <span className="bg-green-500 text-white text-xs px-2 py-1 rounded">Added</span>}
+                                        {isAlreadyAdded && <span className={`${badgeClass} text-xs px-2 py-1 rounded`}>{badgeLabel}</span>}
                                       </div>
                                       <div className="text-sm text-gray-300">
                                         MAC: {light.mac}
