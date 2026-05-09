@@ -93,9 +93,9 @@ jobs:
         continue-on-error: true
 
       - name: Build
+        # REACT_APP_API_URL is intentionally not set — the services default
+        # to '' which yields relative URLs (same-origin in production).
         env:
-          # Empty REACT_APP_API_URL → relative URLs (same-origin in production).
-          REACT_APP_API_URL: ''
           REACT_APP_VERSION: ${{ needs.version.outputs.full }}
           CI: false
         run: npm run build
