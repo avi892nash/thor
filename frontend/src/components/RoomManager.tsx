@@ -306,7 +306,7 @@ export const RoomManager: React.FC<RoomManagerProps> = ({
         }
         return null;
       })
-      .filter((device): device is IoTDevice => device !== null);
+      .filter(device => device !== null) as IoTDevice[];
 
     // Devices may live in multiple rooms, but a single room cannot contain
     // the same MAC twice — dedupe within the destination only.
