@@ -111,8 +111,9 @@ const Shell = () => {
 // Small build-version badge fixed to the bottom-right of the viewport.
 // REACT_APP_VERSION is injected at build time by the CI workflow
 // (see .github/workflows/ci.yml — the build-frontend job sets it from the
-// version job's `full` output, e.g. "2.0.0+f1a1de7"). Falls back to "dev"
-// when the var isn't set (local `npm start`).
+// version job's `base` output, i.e. server/package.json's version field
+// like "2.0.0", semantic-release bumps that on every release). Falls back
+// to "dev" when the var isn't set (local `npm start`).
 const VersionBadge = () => {
   const version = process.env.REACT_APP_VERSION || 'dev';
   return (
