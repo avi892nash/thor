@@ -108,12 +108,31 @@ const Shell = () => {
   );
 };
 
+// Small build-version badge fixed to the bottom-right of the viewport.
+// REACT_APP_VERSION is injected at build time by the CI workflow
+// (see .github/workflows/ci.yml — the build-frontend job sets it from the
+// version job's `full` output, e.g. "2.0.0+f1a1de7"). Falls back to "dev"
+// when the var isn't set (local `npm start`).
+const VersionBadge = () => {
+  const version = process.env.REACT_APP_VERSION || 'dev';
+  return (
+    <div
+      className="fixed bottom-2 right-3 z-50 select-text text-[11px] leading-none text-white/40 hover:text-white/70 bg-black/40 backdrop-blur-sm px-2 py-1 rounded-full transition-colors"
+      title={`Thor v${version}`}
+      aria-label={`Thor version ${version}`}
+    >
+      v{version}
+    </div>
+  );
+};
+
 function App() {
   return (
     <AuthProvider>
       <AuthGate>
         <Shell />
       </AuthGate>
+      <VersionBadge />
     </AuthProvider>
   );
 }
