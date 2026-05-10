@@ -269,6 +269,16 @@ export const RoomManager: React.FC<RoomManagerProps> = ({
     setNewRoomName('');
   };
 
+  // Return every room that already contains a device with this MAC. Devices CAN
+  // legitimately live in more than one room (e.g. a "Whole House" room that
+  // aggregates lights from per-room groupings), so this is used purely for
+  // display — to tell the user "FYI this bulb is also in <X>" — not to gate
+  // adding the device anywhere.
+  const roomsContainingMac = (mac: string | undefined): Room[] => {
+    if (!mac) return [];
+    return rooms.filter(r => (r.devices || []).some(d => d.mac === mac));
+  };
+
   const addDevicesToRoom = (roomId: string, deviceMacs: string[]) => {
     const devicesToAdd: IoTDevice[] = deviceMacs
       .map(mac => {
@@ -298,11 +308,13 @@ export const RoomManager: React.FC<RoomManagerProps> = ({
       })
       .filter(device => device !== null) as IoTDevice[];
 
+    // Devices may live in multiple rooms, but a single room cannot contain
+    // the same MAC twice — dedupe within the destination only.
     const updatedRooms = rooms.map(room => {
       if (room.id === roomId) {
         const devices = room.devices || [];
         const existingDeviceMacs = devices.map(d => d.mac);
-        const newDevices = devicesToAdd.filter(device => !existingDeviceMacs.includes(device.mac));
+        const newDevices = devicesToAdd.filter(d => !existingDeviceMacs.includes(d.mac));
         return {
           ...room,
           devices: [...devices, ...newDevices]
@@ -334,6 +346,8 @@ export const RoomManager: React.FC<RoomManagerProps> = ({
       properties: {}
     };
 
+    // Devices can live in multiple rooms, but a single room cannot contain
+    // the same MAC twice — dedupe within the destination only.
     const updatedRooms = rooms.map(room => {
       if (room.id === roomId) {
         const devices = room.devices || [];
@@ -719,16 +733,22 @@ export const RoomManager: React.FC<RoomManagerProps> = ({
                         <>
                           <div className="space-y-2 mb-4">
                             {discoveredLights.filter(l => l.mac).map(light => {
-                              const existingDeviceMacs = rooms.find(r => r.id === room.id)?.devices?.map(d => d.mac) || [];
-                              const isAlreadyAdded = light.mac ? existingDeviceMacs.includes(light.mac) : false;
+                              // A bulb may live in multiple rooms (e.g. a "Whole House"
+                              // grouping). Disable the checkbox only if the bulb is
+                              // already in THIS room — for bulbs in *other* rooms, show
+                              // an informational "Also in <RoomName>" badge but keep
+                              // the checkbox selectable so the user can add it here too.
+                              const containingRooms = roomsContainingMac(light.mac);
+                              const isAlreadyInThisRoom = containingRooms.some(r => r.id === room.id);
+                              const otherRooms = containingRooms.filter(r => r.id !== room.id);
 
                               return (
-                                <div key={light.mac} className={`flex items-center gap-3 p-3 rounded-lg ${isAlreadyAdded ? 'bg-gray-600/30 border border-gray-500/30' : 'bg-gray-600/50 border border-white/20 hover:bg-gray-600/70'}`}>
+                                <div key={light.mac} className={`flex items-center gap-3 p-3 rounded-lg ${isAlreadyInThisRoom ? 'bg-gray-600/30 border border-gray-500/30' : 'bg-gray-600/50 border border-white/20 hover:bg-gray-600/70'}`}>
                                   <input
                                     type="checkbox"
                                     id={`device-${light.mac}`}
-                                    checked={isAlreadyAdded || (light.mac ? selectedDevices.includes(light.mac) : false)}
-                                    disabled={isAlreadyAdded || !light.mac}
+                                    checked={isAlreadyInThisRoom || (light.mac ? selectedDevices.includes(light.mac) : false)}
+                                    disabled={isAlreadyInThisRoom || !light.mac}
                                     onChange={(e) => {
                                       if (!light.mac) return;
                                       if (e.target.checked) {
@@ -737,13 +757,23 @@ export const RoomManager: React.FC<RoomManagerProps> = ({
                                         setSelectedDevices(selectedDevices.filter(mac => mac !== light.mac));
                                       }
                                     }}
-                                    className={`rounded ${isAlreadyAdded ? 'opacity-50' : ''}`}
+                                    className={`rounded ${isAlreadyInThisRoom ? 'opacity-50' : ''}`}
                                   />
-                                  <label htmlFor={`device-${light.mac}`} className={`flex-1 cursor-pointer ${isAlreadyAdded ? 'opacity-50' : ''}`}>
+                                  <label htmlFor={`device-${light.mac}`} className={`flex-1 cursor-pointer ${isAlreadyInThisRoom ? 'opacity-50' : ''}`}>
                                     <div className="text-white">
                                       <div className="flex items-center gap-2">
                                         <strong>{light.name || `Bulb ${light.mac?.slice(-4)}`}</strong>
-                                        {isAlreadyAdded && <span className="bg-green-500 text-white text-xs px-2 py-1 rounded">Added</span>}
+                                        {isAlreadyInThisRoom && (
+                                          <span className="bg-green-500 text-white text-xs px-2 py-1 rounded">Added</span>
+                                        )}
+                                        {otherRooms.length > 0 && (
+                                          <span
+                                            className="bg-blue-500/80 text-white text-xs px-2 py-1 rounded"
+                                            title={`Already in: ${otherRooms.map(r => r.name).join(', ')}. You can still add it here.`}
+                                          >
+                                            Also in {otherRooms.length === 1 ? otherRooms[0]!.name : `${otherRooms.length} rooms`}
+                                          </span>
+                                        )}
                                       </div>
                                       <div className="text-sm text-gray-300">
                                         MAC: {light.mac}
